@@ -1,4 +1,12 @@
-function SAUCY(RHD_name,ch_num,subtract,RHD_already_loaded,n_clusters)
+function SAUCY_main(RHD_name,ch_num,subtract,RHD_already_loaded,n_clusters)
+
+% Redesigning SAUCY as a class so that each instantiation is a file that
+% can be analyzed on its own
+
+% Changing RHD_name to exp_name
+% --> Need to update all uses of RHD_name
+% --> Need to check for: exp_name = cbin_name
+% --> Need to check for: exp_name = rhd_name
 
 if nargin==2,n_clusters=2;
     RHD_already_loaded=0;
