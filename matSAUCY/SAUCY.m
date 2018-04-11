@@ -7,6 +7,7 @@ classdef SAUCY < handle
     properties
         experiment_name = '' % base name of experiment
         
+        data_path = '' % path to data files
         fname_intan = '' % full file name of intan file
         fname_cbin = '' % full file name of cbin file
         fname_neuralnot = '' % full file name of neural_not file
@@ -19,13 +20,34 @@ classdef SAUCY < handle
         n_clusters = 2 % number of clusters to detect
         
         Fs = 30000 % sampling rate of recording
+        F_low = 300 % low cut off
+        F_high = 7500 % hi cut off
         
-        data = {} % Struct to store data
+        raw_data = {} % Struct for raw data 
+        data = {} % Struct for results
     end
     
     methods
-        function load_data()
-           
+        % Initialize SAUCY object
+        function S = SAUCY(experiment_name)
+            S.experiment_name = experiment_name;
+        end
+        
+        % Load data into SAUCY object
+        function load_data(S, filename)
+            if strfind(filename, '.rhd') > 0
+               [t_amplifier, t_board_adc, amplifier_data, board_adc_data, frequency_parameters] = read_Intan_RHD2000_nongui_saucy(RHD_name);
+               S.raw_data.t_amplifier = t_amplifier;
+               S.raw_data.t_board_adc = t_board_adc;
+               S.raw_data.amplifier_data = amplifier_data;
+               S.raw_data.board_adc_data = board_adc_data;
+               
+               S.Fs = frequency_parameters.amplifier_sample_rate;
+            elseif strfind(filename, '.cbin' > 0
+                % use cbin script
+            else
+                % use default script
+            end
         end
     end
     
