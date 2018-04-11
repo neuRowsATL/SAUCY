@@ -1,3 +1,8 @@
+% batchmode_condition = 0 - regular single-file mode
+% batchmode_condition = 1 - batch mode
+% batchmode_condition = 2 - check mode - loads  files own .not.mat file and plots data
+% batchmode_condition = 3 - add latent mode
+
 function Data=analyze(RHD_name,ch_num,subtract,RHD_already_loaded,n_clusters,Data,batchmode_condition,varargin)
 % top_right_plot_code=1  PCA based on amplitude alone
 % top_right_plot_code=2 determine optimal threshold
