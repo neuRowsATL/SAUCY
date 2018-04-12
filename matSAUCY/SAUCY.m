@@ -1299,6 +1299,14 @@ classdef SAUCY < handle
             end
 
         end
+        
+        function do_saucy(S)
+            % ----->> NEED TO SET UP DEFAULT ARGUMENTS FOR FUNCTIONS
+            filter_data(S);
+            set_threshold(S);
+            set_spike_mat(S);
+            optimize_clusters(S);
+        end
     end
     
 end
