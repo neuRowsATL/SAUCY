@@ -6,6 +6,7 @@ classdef SAUCY < handle
     
     properties
         verbose = 0 % level of verbose output
+        warning_str = [];
         
         experiment_name = '' % base name of experiment
         
@@ -24,6 +25,8 @@ classdef SAUCY < handle
         
         n_clusters = 2 % number of clusters to detect
         IDX % Indices of clusters for spike_mat
+        SCORE % Score from PCA
+        C % #IDK
         
         Fs = 30000 % sampling rate of recording
         F_low = 350 % low cut off
@@ -283,6 +286,13 @@ classdef SAUCY < handle
         end
         
         % ----- ----- ----- ----- -----
+        % Set spike times based on outside source
+        function set_spikes_times(S, spike_times)
+            
+            
+        end
+        
+        % ----- ----- ----- ----- -----
         % Extract spike waveforms aligned by peak or threshold crossing
         function set_spike_mat(S, alignment)
             % Identify spike peaks (copied from neural_and_song.m)
@@ -416,6 +426,7 @@ classdef SAUCY < handle
                     % Modified: UPDATED FUNCTION CALL
                     % [COEFF, SCORE,LATENT] = princomp(spike_mat);
                     [COEFF, SCORE,LATENT] = pca(spike_mat);
+                    S.SCORE = SCORE;
                     
                     
                     if show_timing
@@ -464,6 +475,8 @@ classdef SAUCY < handle
                         IDX(find(IDX_old==wave_id_by_size(x)))=x;
                         C(x,:)=C_old(wave_id_by_size(x),:);
                     end
+                    
+                    S.C = C;
                     
                     for x=1:n_clusters
                         % CHECK if this is right - component{x} will drift as mean centers
@@ -687,6 +700,12 @@ classdef SAUCY < handle
         end
         
         % ===== ===== ===== ===== =====
+        % Do clustering using kmeans
+        function do_clustering(S, n_clusters)
+            
+        end
+        
+        % ===== ===== ===== ===== =====
         % Optimize clusters
         function optimize_clusters(S, top_right_plot_code, threshold_strategy)
             % top_right_plot_code=1  PCA based on amplitude alone
@@ -734,14 +753,17 @@ classdef SAUCY < handle
             end
             
             n_clusters = S.n_clusters;
-            id_peaks_save = S.id_peaks_save;
-            IDX = S.IDX;
-            dat = S.data.amplifier_data_filt;
+            id_peaks_save = S.id_peaks_save';
+            IDX = S.IDX';
+            C = S.C;
+            
+            dat = S.data.amplifier_data_filt';
             Fs = S.Fs;
             id_for_samp = S.id_for_samp;
             
             TH_original = S.TH_original;
             
+            SCORE = S.SCORE;
             spike_mat = S.spike_mat;
             invert_sign = S.inv_sign;
             nsamp_wave = S.nsamp_wave;
@@ -938,7 +960,10 @@ classdef SAUCY < handle
                     all_noise_mags=[all_noise_mags; all_mags{x}];
                 end
                 if max(abs(all_noise_mags))>max(abs(all_mags{end}))
-                    warning_str{end+1}='Biggest noise spike is bigger than biggest signal spike';disp(' ');disp(warning_str{end});disp(' ');
+                    S.warning_str{end+1}='Biggest noise spike is bigger than biggest signal spike';
+                    disp(' ');
+                    disp(S.warning_str{end});
+                    disp(' ');
                 end
 
                 % sweep through the potential threshold values and record number of
@@ -963,8 +988,8 @@ classdef SAUCY < handle
                     id_tmp=max(find(pct_of_positives_that_are_true_positives>.95));
                     if isempty(id_tmp)
                         [tmp,id_tmp]=max(pct_of_positives_that_are_true_positives);
-                        warning_str{end+1}=['pct_of_positives_that_are_true_positives never gets to criterion - using peak = ' num2str(tmp)];
-                        disp(warning_str{end})
+                        S.warning_str{end+1}=['pct_of_positives_that_are_true_positives never gets to criterion - using peak = ' num2str(tmp)];
+                        disp(S.warning_str{end})
                     end
                     pct_of_positives_that_are_true_positives_at_thresh=pct_of_positives_that_are_true_positives(id_tmp);
                     pct_of_spikes_that_are_above_thresh=n_spikes_as_spikes_vec(id_tmp)/length(all_mags{end});
@@ -973,7 +998,7 @@ classdef SAUCY < handle
                         id_tmp=min(find(n_spikes_as_spikes_vec/length(all_mags{end})>.25));
                         pct_of_positives_that_are_true_positives_at_thresh=pct_of_positives_that_are_true_positives(id_tmp);
                         pct_of_spikes_that_are_above_thresh=n_spikes_as_spikes_vec(id_tmp)/length(all_mags{end});
-                        warning_str{end+1}='Less than 10% of main-cluster spikes beyond threshold, resetting thresh so that 25% are within';
+                        S.warning_str{end+1}='Less than 10% of main-cluster spikes beyond threshold, resetting thresh so that 25% are within';
                     end
                     TH_empirical_by_type_1_error=th_sweep_vec(id_tmp);
                     % % figure showing how this works
@@ -1022,8 +1047,8 @@ classdef SAUCY < handle
                             TH_empirical=mean(TH_empirical);
                             TH_empirical_id=round(mean(TH_empirical_id));
                         else
-                            warning_str{end+1}='Two discontinuous possible locations for optimal threshold';
-                            disp(warning_str{end});
+                            S.warning_str{end+1}='Two discontinuous possible locations for optimal threshold';
+                            disp(S.warning_str{end});
                             TH_empirical=0;
                         end
                     end
@@ -1069,6 +1094,210 @@ classdef SAUCY < handle
                     disp(['Elapsed time computing threshold = ' num2str(toc)]);
                 end
             end
+            
+            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%5
+            %if plot_flag;subplot(2,2,3);hold on;end
+            subplot(2,10,11:14);
+            cla;
+            hold on;
+
+            if show_timing;
+                tic;
+                disp('Starting timer...');
+            end
+
+            only_plot_subset=0;
+            %pct_to_plot_PCA=.2;  % percent of each cluster to plot
+            n_to_plot_PCA=1000;  % number from each cluster to plot
+
+            for x=1:n_clusters
+                id_tmp=find(IDX==x);
+                n_points_in_cluster(x)=length(id_tmp);
+                cov_centers{x}=mean(SCORE(id_tmp,1:2));
+                cov_matrices{x}=cov(SCORE(id_tmp,1),SCORE(id_tmp,2));
+                
+                ellipsoid=plot_cov(cov_centers{x},cov_matrices{x},col_vec(x),.0455);
+                if only_plot_subset
+                    %             disp(['ONLY PLOTTING ' num2str(pct_to_plot_PCA*100) ' % OF PCA POINTS IN LOWER LEFT'])
+                    %             id_tmp_part=id_tmp(1:round(length(id_tmp)*pct_to_plot_PCA));
+                    tstr{1}=['ONLY PLOTTING ' num2str(n_to_plot_PCA) ' OF PCA POINTS FROM EACH CLUSTER'];disp([tstr{1} ' IN LOWER LEFT'])
+                    id_tmp_part=save_example_ids{x};
+                    plot(SCORE(id_tmp_part,1),SCORE(id_tmp_part,2),[col_vec(x) 'o' ],'markersize',2,'markerfacecolor',col_vec(x))
+                else
+                    plot(SCORE(id_tmp,1),SCORE(id_tmp,2),[col_vec(x) 'o' ],'markersize',2,'markerfacecolor',col_vec(x))
+                end
+                plot(C(x,1),C(x,2),[col_vec(x) 'x'] ,'linew',2)
+
+                if 0% threshold_strategy==1% circles the points beyond thresh
+                    % these are the ids of spikes from rec thresh
+                    [tmp,tmp,id_tmp2]=intersect(Data.spiketimes_from_recommended_TH,spike_times{x});
+                    plot(SCORE(id_tmp(id_tmp2),1),SCORE(id_tmp(id_tmp2),2),['mo' ])
+                end
+
+            end
+            tstr{2}='Ellipses are 95.4% conf intervals (2 S.D.)';
+            
+            title(tstr);
+            xl=get(gca,'xlim');
+            yl=get(gca,'xlim');
+            set(gca,'xlim',xl,'ylim',yl);
+            
+            if show_timing,disp(['Elapsed time plotting PCA clusters= ' num2str(toc)]);end
+
+            %if plot_flag;subplot(2,2,4);hold on;end
+            subplot(2,10,15:18);
+            cla;
+            hold on;
+            
+            if show_timing;
+                tic;
+                disp('Starting timer...');
+            end
+
+            out_all=[];
+            sim_cluster_id=[];
+            % will simulate a total of 10000 points, with number of points in each
+            % cluster proportional to the size of each cluster
+            n_points_vec=round(n_points_in_cluster/sum(n_points_in_cluster)*10000);
+
+            for x=1:n_clusters
+                % compute and plot covariance matrices for each computed cluster
+                id_tmp=find(IDX==x);
+
+                % generate n_points of data generated from 2D gaussian with
+                % the computed covariance and center
+                n_points=n_points_vec(x);
+                normnoise=randn(n_points,2);
+
+                out_newcluster{x}=normnoise*sqrtm(cov_matrices{x});
+                out_newcluster{x}(:,1)=out_newcluster{x}(:,1)+cov_centers{x}(1);
+                out_newcluster{x}(:,2)=out_newcluster{x}(:,2)+cov_centers{x}(2);
+
+                % plot points generated with these clusters
+                
+                plot_cov(cov_centers{x},cov_matrices{x},col_vec(x),.0455);
+                plot(out_newcluster{x}(:,1),out_newcluster{x}(:,2),[col_vec(x)  'o'],'markersize',2,'markerfacecolor',col_vec(x))
+
+
+                % record cluster number from which each point was generated
+                sim_cluster_id=[sim_cluster_id; x*ones(n_points,1)];
+
+                % combine synthetic clusters to be sorted according to KMEANS
+                out_all=[ out_all; out_newcluster{x}];
+            end
+
+            L_mat=length(out_all);
+            n_blocks=ceil(L_mat/1000);  % do this 1000 points at a time
+            dist_mat_by_data_centers=[];
+            % divide this up into three blocks to avoid running out of memory
+            for x=1:n_blocks
+                ind=1+(x-1)*1000:min([x*1000 L_mat]);
+                MAT_FOR_DISTANCES=[C;out_all(ind,:)];
+                % a matrix of distances between all these points
+                % NOTE:  function pdist isnt really the right one, since it calculated
+                % distance between ALL points, not just the C matrix.  this is sort of
+                % wasteful in terms of memory
+                DIST_MAT_tmp=squareform(pdist(MAT_FOR_DISTANCES));
+                % clip off distance columns corresponding to  C matrix
+                DIST_MAT_tmp=DIST_MAT_tmp(:,n_clusters+1:end);
+                % Make an n_clusters x n_simulated_points matrix of distances
+                for j=1:n_clusters
+                    dist_mat_by_data_centers(j,ind)=DIST_MAT_tmp(j,:);
+                end
+            end
+            clear DIST_MAT_tmp MAT_FOR_DISTANCES
+
+            % find minima of these (IDX_simulated is id of the row of
+            % dist_mat_by_data_centers that has minimum distance
+            [tmp,IDX_simulated]=min(dist_mat_by_data_centers);
+            IDX_simulated=IDX_simulated';
+
+            % cases where the classification of the simulated data (IDX_simulated)
+            % doesnt match the classification that generated it (sim_cluster_id)
+            disagreements=find(IDX_simulated ~= sim_cluster_id);
+            
+            for x=1:n_clusters
+                id_tmp=intersect(find(IDX_simulated==x),disagreements);
+                plot(out_all(id_tmp,1),out_all(id_tmp,2),[col_vec(x) 'o' ])
+            end
+            set(gca,'xlim',xl,'ylim',yl);
+            y_range=diff(yl);
+            text(xl(1)+.2*diff(xl),yl(2),['Of ' num2str(sum(n_points_vec)) ' simulated points: '],'color','k','fontweight','bold')
+
+
+            error_str=[];
+            for x=1:n_clusters
+
+                classed_as_x_AND_from_x=length(find(IDX_simulated==x & sim_cluster_id==x));
+                NOT_classed_as_x_AND_from_x=length(find(IDX_simulated~=x & sim_cluster_id==x));
+                classed_as_x_AND_from_NOT_x=length(find(IDX_simulated==x & sim_cluster_id~=x));
+                classed_as_x=length(find(IDX_simulated==x));
+                from_x=length(find(sim_cluster_id==x));
+                NOT_from_x=length(find(sim_cluster_id~=x));
+
+                FALSE_POSITIVE_n(x)=classed_as_x_AND_from_NOT_x;
+                FALSE_NEGATIVE_n(x)=NOT_classed_as_x_AND_from_x;
+                TOTAL_ERROR_n(x)=NOT_classed_as_x_AND_from_x+classed_as_x_AND_from_NOT_x;
+
+                FALSE_POSITIVE_RATE(x)=classed_as_x_AND_from_NOT_x/NOT_from_x;
+                FALSE_NEGATIVE_RATE(x)=NOT_classed_as_x_AND_from_x/from_x;
+                pct_error(x)=(NOT_classed_as_x_AND_from_x+classed_as_x_AND_from_NOT_x)/(from_x + NOT_from_x);
+
+                pct_error_str{x}=num2str(round(10000*pct_error(x))/100);
+                
+                text(xl(1)+.2*diff(xl),.9*yl(2)-.05*y_range*(x-1),[num2str(TOTAL_ERROR_n(x)) ' errors (' pct_error_str{x} '%) between cluster ' num2str(x) ' & others' ],'color',col_vec(x),'fontweight','bold')
+                
+                error_str=[error_str pct_error_str{x} '%          '];
+            end
+            disp([error_str '     '  num2str(TH_empirical) '    ' S.experiment_name])
+            if show_timing,disp(['Elapsed time simulating distributions= ' num2str(toc)]);end
+
+
+
+
+
+
+
+            subplot(2,10,19:20);
+            cla;
+            hold on;
+            
+            for x=1:n_clusters+1
+                id_tmp=find(IDX==x);
+                %     spike_ids_by_pca{x}=id_peaks_save(id_tmp);
+                %     spike_times{x}=spike_ids_by_pca{x}/32000;
+                ISI_vec=0:.0005:.1;ID_1ms=find(ISI_vec<=.001);
+                col_tmp='rgbmky';
+                max_y=0;
+                if x<=n_clusters
+                    y=hist(diff(spike_times{x}),ISI_vec);
+                else
+                    y=hist(diff(spiketimes_from_recommended_TH),ISI_vec);
+                end
+                pct_Leq_1ms(x)=sum(y(ID_1ms))/sum(y);
+                
+                if x<=n_clusters
+                    plot(ISI_vec(1:end-1),y(1:end-1)/sum(y),[col_tmp(x)],'linew',2)
+                else
+                    plot(ISI_vec(1:end-1),y(1:end-1)/sum(y),[col_tmp(x-1)],'linew',1)
+                end
+                yl(x,:)=get(gca,'ylim');
+                xl=[0 .1];
+                set(gca,'xlim',xl,'ylim',[0 max(yl(:,2))])
+                plot([.001 .001],[0 1],'k--')
+
+            end
+            
+            yl=min(yl,[],1);
+            for x=1:n_clusters+1
+                tmp=num2str(round(10000*pct_Leq_1ms(x))/100);
+                if x<=n_clusters
+                    text(xl(1)+.1*diff(xl),yl(2)-.075*(x)*diff(yl),['% ISIs <= 1 ms - ' num2str(tmp) '%'],'fontweight','bold','color',col_tmp(x))
+                else
+                    text(xl(1)+.1*diff(xl),yl(2)-.075*(x)*diff(yl),['% ISIs <= 1 ms - ' num2str(tmp) '% from thresh'],'color',col_tmp(x-1))
+                end
+            end
+
         end
     end
     
