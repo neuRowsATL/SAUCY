@@ -2,3 +2,5 @@
 mySaucy = SAUCY('bl21lb21_171218', 8);
 
 load_data(mySaucy, 'bl21lb21_171218_125531.rhd');
+filter_data(mySaucy);
+set_threshold(mySaucy, 'raw');
