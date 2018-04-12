@@ -496,6 +496,9 @@ while ~finished
     end
 end
 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 if plot_flag;subplot(2,9,4:7);hold on;end
 if show_timing;tic;disp('Starting timer...');end
