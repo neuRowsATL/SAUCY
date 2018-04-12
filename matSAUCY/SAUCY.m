@@ -14,12 +14,16 @@ classdef SAUCY < handle
         fname_cbin = '' % full file name of cbin file
         fname_neuralnot = '' % full file name of neural_not file
         
+        col_vec='rgbc';
+        col_mat=[1 0 0;0 1 0;0 0 1;1 1 0];
+        
         % chan          Channel number(s) for analysis
         %   as INT      Single channel will be used
         %   as TUPLE    Channel subtraction will be used [a b] = a - b
         chan = []
         
         n_clusters = 2 % number of clusters to detect
+        IDX % Indices of clusters for spike_mat
         
         Fs = 30000 % sampling rate of recording
         F_low = 350 % low cut off
@@ -33,9 +37,11 @@ classdef SAUCY < handle
         inv_waveform % indicates whether waveform has been inverted or not
         
         threshold = [] % Spike detection threshold
+        TH_original % for plotting purposes only
         use_crossing % indicates whether to align to peaks or threshold
         nsamp_wave = [30 90]
         
+        id_for_samp % ids for 1 s of sample data in middle of file
         spike_mat % matrix of spike waveforms
         id_peaks_save % id of peaks... ?
     end
@@ -72,7 +78,7 @@ classdef SAUCY < handle
                 S.raw_data.board_adc_data = board_adc_data;
                 
                 % Set default data for analysis
-                S.data.amplifier_data_filt = S.raw_data.amplifier_data;
+                S.data.amplifier_data_filt = S.raw_data.amplifier_data(S.chan,:);
                
                 S.Fs = frequency_parameters.amplifier_sample_rate;
                
@@ -154,7 +160,7 @@ classdef SAUCY < handle
             elseif strcmp(data_source, 'raw') | strcmp(data_source, '')
                 if isfield(S.raw_data, 'amplifier_data')
                     disp('Using raw data to find threshold.');
-                    dat = S.raw_data.amplifier_data;
+                    dat = S.raw_data.amplifier_data(S.chan,:);
                 else
                     disp('ERROR: Check that data was loaded into SAUCY.');
                 end
@@ -164,7 +170,7 @@ classdef SAUCY < handle
                 
             Fs = S.Fs;
             
-            % ----->> MIGHT NEED TO RECALIBRATE THIS IF SPIKES ARE SPARSE
+            % BC ----->> MIGHT NEED TO RECALIBRATE THIS IF SPIKES ARE SPARSE
             % IN FILE
             
             % Selects 1 second of data from the middle of the file
@@ -176,6 +182,8 @@ classdef SAUCY < handle
                 id_for_samp=1:length(dat);    
             end
 
+            S.id_for_samp = id_for_samp;
+            
             % Plot waveform sample for user selection of threshold
             figure();
             plot([1:length(id_for_samp)]/Fs, dat(id_for_samp), 'k');
@@ -218,7 +226,7 @@ classdef SAUCY < handle
                 TH_oldmethod = mean(dat) + TH_sign*n_SD_for_TH*std(dat);
                 
                 % New method: mean(btwn thresh) +/- 2*std(btwn thresh)
-                % ----->> CONSIDER USING ADJUSTED STD based on Rossant 2016?
+                % BC ----->> CONSIDER USING ADJUSTED STD based on Rossant 2016?
                 TH = mean(dat_clipped_tmp)+TH_sign*n_SD_for_TH*std(dat_clipped_tmp);
                 
                 disp(['Adjusting threshold from MEAN +/- 2*SD = ' num2str(TH_oldmethod) ' to ' num2str(TH)])
@@ -236,9 +244,10 @@ classdef SAUCY < handle
                 disp(['Computed TH = ' num2str(TH) ' (MEAN - ' num2str(n_SD_for_TH) '*SD)'])
             end
             
-            TH_original = TH;
+            S.TH_original = TH;
             S.threshold = TH;
             
+            % BC ----->> WHY INVERT AND THEN UN-INVERT?!?
             % problems here
             if  TH < 0
                 S.data.amplifier_data_filt = -S.data.amplifier_data_filt;
@@ -257,6 +266,15 @@ classdef SAUCY < handle
                 S.inv_waveform = 0;
             end
             
+            close(gcf);
+            
+            figure();
+            plot(S.raw_data.t_amplifier, dat);
+            hold on;
+            plot(xlim, [TH TH], 'r-');
+            title('Press [ENTER] to continue...');
+            
+            x = input('Press [ENTER] to continue...', 's');
             close(gcf);
 
             % ----->> POSSIBLE BUG NEEDS TO BE FIXED
@@ -282,8 +300,11 @@ classdef SAUCY < handle
                     S.use_crossing = true;
                 end
             end
-            
+
+            dat = S.data.amplifier_data_filt;
+            TH = S.threshold;
             use_crossing = S.use_crossing;
+            Fs = S.Fs;
             
             if S.verbose > 1
                 show_timing = true;
@@ -332,8 +353,8 @@ classdef SAUCY < handle
             % Extract spike waveforms and establish vertical and horizontal
             % limits
             % -----
-            col_vec='rgbc';
-            col_mat=[1 0 0;0 1 0;0 0 1;1 1 0];
+            col_vec = S.col_vec;
+            col_mat = S.col_mat;
 
             finished = false;
             
@@ -416,6 +437,8 @@ classdef SAUCY < handle
                     % components
                     
                     [IDX,C] = kmeans(SCORE(:,1:2), n_clusters);
+                    S.IDX = IDX;
+                    
                     if show_timing
                         disp(['Elapsed time grouping points= ' num2str(toc)]);
                     end
@@ -458,6 +481,7 @@ classdef SAUCY < handle
 
                     redo_peaks = false;
                 end
+                % END OF "redo_peaks" CONDITIONTAL
 
                 if replot
                     cla;
@@ -471,9 +495,12 @@ classdef SAUCY < handle
                     
                     clear spike_mat_tmp
                     
+                    % Make final plot showing waveforms and clusters
+                    % -----
                     if vert_spike_lims_approved & horiz_spike_lims_approved
+                        close(gcf);
                         figure();
-                        subplot(2,3,1);
+                        %subplot(2,3,1);
                         
                         for z=1:n_clusters
                             id_tmp=find(IDX==z);
@@ -527,7 +554,15 @@ classdef SAUCY < handle
                     end
                     
                     xlabel('Time (msec)');
-                    t_str{1}=RemoveUnderScore(RHD_name);
+                    if length(S.fname_intan) > 0
+                        t_str{1}=RemoveUnderScore(S.fname_intan);
+                    elseif length(S.fname_cbin) > 0
+                        t_str{1}=RemoveUnderScore(S.fname_cbin);
+                    elseif length(S.fname_neuralnot) > 0
+                        t_str{1}=RemoveUnderScore(S.fname_neuralnot);
+                    else
+                        t_str{1}=RemoveUnderScore(S.experiment_name);
+                    end
                     title(t_str)
                     
                     if first_plotting
@@ -555,7 +590,9 @@ classdef SAUCY < handle
                     end
                     
                 end
+                % END OF "replot" CONDITIONAL
 
+                % GET SPIKE VERT/HORIZ LIMITS
                 if ~vert_spike_lims_approved | ~horiz_spike_lims_approved
                     if ~vert_spike_lims_approved
                         if vert_spike_lims(1)==0;
@@ -637,10 +674,399 @@ classdef SAUCY < handle
                             id_peaks_save=id_peaks_save(id);
 
                         end
-                    end
+                    end                    
                 else
                     finished = true;
+                    
+                    S.spike_mat = spike_mat;
+                    S.id_peaks_save = id_peaks_save;
+                    
                     set(gca,'xlim',[min(xdat) max(xdat)]);
+                end
+            end
+        end
+        
+        % ===== ===== ===== ===== =====
+        % Optimize clusters
+        function optimize_clusters(S, top_right_plot_code, threshold_strategy)
+            % top_right_plot_code=1  PCA based on amplitude alone
+            % top_right_plot_code=2 determine optimal threshold
+            if nargin == 1
+                top_right_plot_code = 2;
+                threshold_strategy = 1;
+            elseif nargin == 2
+                threshold_strategy = 1;
+            end
+            
+            % CASES FOR top_right_plot_code = 2
+            %    threshold_strategy = 1
+            %         Finds largest (furthest from zero) theshold such that the false
+            %         positive rate is less than 1%.  That is, the threshold is set
+            %         such that if a spike exceeds the threshold, there is a 99% chance
+            %         that it came from the cluster with the largets mean amplitude.
+            %         As a consequence, if there is a lot of amplitude overlap between
+            %         clusters, a large number of spikes will be excluded.  However,
+            %         you can have high confidence (99%) that the included spikes were
+            %         a part of the biggest-spike cluster
+            %
+            %        Then, finds mean - 2.5 S.D. of amplitudes for largest cluster.
+            %         TH_empirical will the the LARGER (furthest from zero) of
+            %         these two measures.
+            %
+            %     threshold_strategy = 2
+            %          Finds the threshold such that the false positive and false
+            %          negative rates are equal (or as close to equal as possible).
+            %          That is, the threshold is set such that the rate at which spikes
+            %          from non-biggest cluster are beyond threshold (fales
+            %          positives)
+            %          is equal to the rate at which spikes from the biggest-spike
+            %          cluster are less than the threshold (false negatives).  Compared
+            %          the the other strategy, this will miss fewer spikes, but will
+            %          include a much greater number of noise waveforms.
+            %
+            %  Note that for very large units, these two strategies will produce nearly
+            %  identical answers.
+            
+            if S.verbose > 1
+                show_timing = true;
+            else
+                show_timing = false;
+            end
+            
+            n_clusters = S.n_clusters;
+            id_peaks_save = S.id_peaks_save;
+            IDX = S.IDX;
+            dat = S.data.amplifier_data_filt;
+            Fs = S.Fs;
+            id_for_samp = S.id_for_samp;
+            
+            TH_original = S.TH_original;
+            
+            spike_mat = S.spike_mat;
+            invert_sign = S.inv_sign;
+            nsamp_wave = S.nsamp_wave;
+            
+            col_vec = S.col_vec;
+            col_mat = S.col_mat;
+            
+            subplot(2,9,4:7);
+            hold on;
+
+            if show_timing
+                tic;
+                disp('Starting timer...');
+            end
+            
+            for x=1:n_clusters
+                id_tmp=find(IDX==x);
+                spike_ids_by_pca{x}=id_peaks_save(id_tmp);
+                spike_times{x}=spike_ids_by_pca{x}/Fs;              % all spike times - BASED ON PEAKS, NOT CROSSINGS
+                all_mags{x}=dat(spike_ids_by_pca{x});
+                mean_peaks_later(x)=mean(dat(spike_ids_by_pca{x}));
+                
+                t_lims=id_for_samp([1 end])/Fs;
+                spike_ids_tmp=spike_times{x}(find(spike_times{x}>t_lims(1) & spike_times{x}<t_lims(2)));
+                plot(spike_ids_tmp-t_lims(1)+1/Fs,dat(round(spike_ids_tmp*Fs)),'o','color',col_vec(x),'markerfacecolor',col_vec(x));
+                
+            end
+            
+            set(gca,'xlim',[0 length(id_for_samp)/Fs])
+
+
+            if show_timing
+                disp(['Elapsed time plotting dots on example waveform= ' num2str(toc)]);
+            end
+            
+            plot([1:length(id_for_samp)]/Fs,dat(id_for_samp),'k')
+            %    plot([1:Fs]/Fs,dat(id_for_samp),'k')
+            set(gca,'ylim',[min(min(spike_mat)) max(max(spike_mat))])
+            yl=get(gca,'ylim');
+                
+            % PCA BASED ON AMPLITUDE ALONE
+            if top_right_plot_code==1
+                %if plot_flag;subplot(2,10,19:20);cla;hold on;end
+                
+                subplot(4,9,8:9);
+                hold on;
+                
+                % invert spike mat if downward spike - now all are upward spikes
+                spike_mat_tmp=spike_mat*invert_sign;
+                
+                %    spike_mat_tmp=spike_mat_for_plotting_and_amp*invert_sign;
+                % column of amplitudes of minima
+                peak_vec=spike_mat_tmp(:,nsamp_wave(1)+1);
+                for x=1:length(peak_vec)
+                    first_der=diff(spike_mat_tmp(x,:));
+                    id=min(intersect(find(first_der>=0),nsamp_wave(1)+1:sum(nsamp_wave)+1));
+                    if isempty(id)
+                        id=sum(nsamp_wave)+1;
+                        disp('Ending spike at end of waveform')
+                    end
+                    trough_vec(x)=spike_mat_tmp(x,id);
+                end
+                
+                spike_mag_vec=peak_vec-trough_vec';
+                
+                % demo to show this works
+                %     figure(100);clf;hold on;plot(spike_mat_tmp(x,:),'r');id,[peak_vec(x)  trough_vec(x)],return
+                [IDX_mags,C_mags] = kmeans(spike_mag_vec, n_clusters);
+                [tmp,spike_id_by_size]=sort(C_mags);
+
+                %%%%%%%%% reorder clusters by spike size
+                % so noise_spikes are in cluster 1, and spikes are in clusters 2-n
+                IDX_mags_old=IDX_mags;
+                C_mags_old=C_mags;
+                clear IDX_mags C_mags
+                for x=1:n_clusters
+                    IDX_mags(find(IDX_mags_old==spike_id_by_size(x)))=x;
+                    C_mags(x,:)=C_mags_old(spike_id_by_size(x),:);
+                end
+                for x=1:n_clusters
+                    id_tmp=find(IDX_mags==x);
+                    n_hist_bins=round(30/n_clusters);
+                    [height,ctrs]=hist(spike_mag_vec(id_tmp),n_hist_bins);
+                    
+                    a=bar(ctrs,height);
+                    set(a,'facecolor',col_vec(x))
+
+                    mean_vec(x)=mean(spike_mag_vec(id_tmp));
+                    std_vec(x)=std(spike_mag_vec(id_tmp));
+                end
+
+                subplot(4,9,17:18);
+                hold on;
+                
+                for x=1:n_clusters
+                    n_gaussfit_bins=round(std_vec(x))*5;
+                    g=gaussian_lf(std_vec(x),n_gaussfit_bins);
+                    plot([1:length(g)]-length(g)/2+mean_vec(x),g,col_vec(x),'linew',2)
+                end
+                n_points_1D=1000;
+                sim_cluster_id_1D=[];
+                out_all_1D=[];
+                for x=1:n_clusters
+                    % compute and plot covariance matrices for each computed cluster
+                    id_tmp=find(IDX_mags==x);
+
+                    % generate n_points of data generated from 1D gaussian with
+                    % the computed variance and mean
+                    normnoise=randn(n_points_1D,1)*std_vec(x)+mean_vec(x);
+
+                    % record cluster number from which each point was generated
+                    sim_cluster_id_1D=[sim_cluster_id_1D; x*ones(n_points_1D,1)];
+
+                    % combine synthetic clusters to be sorted according to KMEANS
+                    out_all_1D=[ out_all_1D; normnoise];
+                end
+                [IDX_mags_simulated,C_mags_simulated] = kmeans(out_all_1D,n_clusters);
+                [tmp,spike_id_by_size]=sort(C_mags_simulated);
+                %%%%%%%%% reorder clusters by spike size
+                % so noise_spikes are in cluster 1, and spikes are in clusters 2-n
+                IDX_mags_old=IDX_mags_simulated;C_mags_old=C_mags_simulated;
+                clear IDX_mags C_mags
+                for x=1:n_clusters
+                    IDX_mags_simulated(find(IDX_mags_old==spike_id_by_size(x)))=x;
+                    C_mags_simulated(x,:)=C_mags_old(spike_id_by_size(x),:);
+                end
+
+                disagreements_1D=find(IDX_mags_simulated ~= sim_cluster_id_1D);
+
+                title(['Total: ' num2str(length(disagreements_1D)) ' errors out of ' num2str(length(IDX_mags_simulated))])
+                xl=get(gca,'xlim');yl=get(gca,'ylim');y_range=diff(yl);
+                new_yl=[yl(1) yl(2)+1.15*y_range];
+                set(gca,'ylim',new_yl,'xlim',xl);
+                text(xl(1)+.2*diff(xl),new_yl(2)-.2*y_range,['Of ' num2str(n_points_1D*n_clusters) ' simulated points: '],'color','k','fontweight','bold')
+
+                error_str=[];
+                for x=1:n_clusters
+                    IDX_tmp=IDX_mags_simulated;
+                    sim_cluster_id_tmp=sim_cluster_id_1D;
+                    IDX_tmp(find(IDX_tmp~=x))=9999;
+                    sim_cluster_id_tmp(find(sim_cluster_id_tmp~=x))=9999;
+                    n_disagreements_by_cluster(x)=length(find(IDX_tmp ~= sim_cluster_id_tmp));
+                    pct_error(x)=n_disagreements_by_cluster(x)/(n_points_1D*n_clusters);
+                    pct_error_str{x}=num2str(round(10000*pct_error(x))/100);
+                    %    disp([num2str(n_disagreements_by_cluster(x)) ' errors (' pct_error_str{x} '%) between cluster ' num2str(x) ' (color = ' col_vec(x) ') and all others' ])
+                    
+                    text(xl(1)+.2*diff(xl),new_yl(2)-.2*y_range*(x+1),[num2str(n_disagreements_by_cluster(x)) ' errors (' pct_error_str{x} '%) between cluster ' num2str(x) ' & others' ],'color',col_vec(x),'fontweight','bold')
+                    
+                    error_str=[error_str pct_error_str{x} '%          '];
+                end
+
+            % FIND THE BEST THRESHOLD
+            elseif top_right_plot_code==2
+
+                subplot(2,9,8:9);
+                cla;
+                hold on;
+
+                if show_timing
+                    tic;
+                    disp('Starting timer...');
+                end
+                
+                concat_mags=[];
+                concat_N=[];
+                concat_spiketimes=[];
+                
+                % plot histogram of amplitudes and save magnitudes
+                for x=1:n_clusters
+                    [N_occurences{x},bin_cov_centerss{x}]=hist(all_mags{x},20);
+                    
+                    plot(N_occurences{x},bin_cov_centerss{x},[col_vec(x) '-o'],'linew',2,'markersize',4);
+                    
+                    % concat_mags=[concat_mags all_mags{x}];
+                    concat_mags=[concat_mags all_mags{x}' ];
+                    concat_N=[concat_N N_occurences{x} ];
+                end
+                % all spiketimes, in order of time
+                [concat_spiketimes,tmp]=sort(cell2mat(spike_times));
+                % all magnitudes, in order of time
+                mags_resorted=concat_mags(tmp);
+
+                % this will put one potential threshold between each spike magnitude.
+                th_sweep_vec=[unique(floor(unique(concat_mags))) ceil(max(concat_mags))];
+
+                if TH_original>0
+                    th_sweep_vec=fliplr(th_sweep_vec);
+                    disp('Flipping th_sweep_vec');
+                end
+
+                % combing spike amplitudes of all clusters except for the biggest
+                all_noise_mags=[];
+                for x=1:n_clusters-1
+                    all_noise_mags=[all_noise_mags; all_mags{x}];
+                end
+                if max(abs(all_noise_mags))>max(abs(all_mags{end}))
+                    warning_str{end+1}='Biggest noise spike is bigger than biggest signal spike';disp(' ');disp(warning_str{end});disp(' ');
+                end
+
+                % sweep through the potential threshold values and record number of
+                % each type of error
+                for x=1:length(th_sweep_vec)
+                    n_spikes_as_noise_vec(x)=length(find(abs(all_mags{end})<abs(th_sweep_vec(x))));%last entry is biggest spike
+                    n_spikes_as_spikes_vec(x)=length(find(abs(all_mags{end})>abs(th_sweep_vec(x))));% last entry is biggest spike
+                    n_noise_as_spikes_vec(x)=length(find(abs(all_noise_mags)>abs(th_sweep_vec(x))));   %noise
+                    total_n_beyond_threshold(x)=length(find(abs(concat_mags)>abs(th_sweep_vec(x))));
+                end
+
+                if show_timing
+                    disp(['Elapsed time running amp for-loop= ' num2str(toc)]);
+                    tic;
+                    disp('Starting timer...');
+                end
+
+                if threshold_strategy==1
+                    warning off % the next line generates a 'divide by zero' warning
+                    pct_of_positives_that_are_true_positives=n_spikes_as_spikes_vec./total_n_beyond_threshold;
+                    warning on
+                    id_tmp=max(find(pct_of_positives_that_are_true_positives>.95));
+                    if isempty(id_tmp)
+                        [tmp,id_tmp]=max(pct_of_positives_that_are_true_positives);
+                        warning_str{end+1}=['pct_of_positives_that_are_true_positives never gets to criterion - using peak = ' num2str(tmp)];
+                        disp(warning_str{end})
+                    end
+                    pct_of_positives_that_are_true_positives_at_thresh=pct_of_positives_that_are_true_positives(id_tmp);
+                    pct_of_spikes_that_are_above_thresh=n_spikes_as_spikes_vec(id_tmp)/length(all_mags{end});
+                    if pct_of_spikes_that_are_above_thresh<.1
+                        disp('Redoing...')
+                        id_tmp=min(find(n_spikes_as_spikes_vec/length(all_mags{end})>.25));
+                        pct_of_positives_that_are_true_positives_at_thresh=pct_of_positives_that_are_true_positives(id_tmp);
+                        pct_of_spikes_that_are_above_thresh=n_spikes_as_spikes_vec(id_tmp)/length(all_mags{end});
+                        warning_str{end+1}='Less than 10% of main-cluster spikes beyond threshold, resetting thresh so that 25% are within';
+                    end
+                    TH_empirical_by_type_1_error=th_sweep_vec(id_tmp);
+                    % % figure showing how this works
+                    %         ww=gcf;figure(101);clf;subplot(1,2,1);hold on;plot(th_sweep_vec,total_n_beyond_threshold,'b');
+                    %         plot(th_sweep_vec,n_spikes_as_spikes_vec,'g');xlabel('blue is total N beyone thresh, green is N spikes as spikes')
+                    %         subplot(1,2,2);hold on;plot(th_sweep_vec,pct_of_positives_that_are_true_positives)
+                    %         yl=get(gca,'ylim');plot(TH_empirical*[1 1],yl,'k--');figure(ww)
+
+                    % NEW - if no overlap between spike mags in biggest-mag cluster and
+                    % others, set empirical threshold at min of biggest-mag cluster
+                    if min(abs(all_mags{end}))>max(abs(all_mags{end-1}))
+                        id_tmp=find(    abs(all_mags{end})  ==    min(abs(all_mags{end})));
+                        TH_empirical_by_STD=all_mags{end}(id_tmp);
+                        disp('NOTE:  No overlap between biggest and next-biggest cluster - setting SD-based threshold to min of big cluster')
+                    else
+                        TH_empirical_by_STD=mean(all_mags{end})-2.5*sign(mean(all_mags{end}))*std(all_mags{end});
+                    end
+
+                    if abs(TH_empirical_by_STD)>abs(TH_empirical_by_type_1_error)
+                        TH_empirical=TH_empirical_by_STD;
+                        disp('Using mean - 2.5 SD of amplitudes as threshold')
+                    else
+                        TH_empirical=TH_empirical_by_type_1_error;disp('Using type 1 error criterion as threshold')
+
+                          %  TH_empirical=-5000;disp('HACK SETTING TH_empirical to -5000')
+            end
+                elseif threshold_strategy==2
+                    n_in_spike_cluster=length(all_mags{end});% last entry is biggest spike
+                    n_in_noise_cluster=length(all_noise_mags);
+
+                    pct_1_vec=n_noise_as_spikes_vec./(n_spikes_as_spikes_vec+n_noise_as_spikes_vec);
+                    pct_2_vec=n_spikes_as_noise_vec./n_in_spike_cluster;
+
+                    abs_diff_vec=abs(pct_1_vec-pct_2_vec);
+
+                    if length(abs_diff_vec)==1;whos;end
+
+                    TH_empirical_id=find(abs_diff_vec==min(abs_diff_vec));
+                    TH_empirical=th_sweep_vec(TH_empirical_id);
+                    if length(TH_empirical)>1
+                        for x=1:length(TH_empirical)
+                            whos TH_empirical th_sweep_vec
+                            TH_id(x)=find(TH_empirical(x)==th_sweep_vec);
+                        end
+                        if prod(diff(TH_id))==1
+                            TH_empirical=mean(TH_empirical);
+                            TH_empirical_id=round(mean(TH_empirical_id));
+                        else
+                            warning_str{end+1}='Two discontinuous possible locations for optimal threshold';
+                            disp(warning_str{end});
+                            TH_empirical=0;
+                        end
+                    end
+                    n_noise_as_spikes=n_noise_as_spikes_vec(TH_empirical_id);
+                    n_spikes_as_noise=n_spikes_as_noise_vec(TH_empirical_id);
+                    n_spikes_as_spikes=n_spikes_as_spikes_vec(TH_empirical_id);
+                end
+
+                title('Spike amplitude and recommended thresh');
+                ylabel('Max amp of spike');
+                xl=[min(concat_N) max(concat_N)];
+                set(gca,'xlim',xl);
+                yl=get(gca,'ylim');
+                plot(xl,TH_empirical*[1 1],'m-o','linew',3,'markerfacecolor','m')
+                if threshold_strategy==1
+                    pct_txt=num2str(round(pct_of_positives_that_are_true_positives_at_thresh*1000)/10);
+                    pct_txt_2=num2str(round(pct_of_spikes_that_are_above_thresh*1000)/10);
+                    xlab_txt{1}='N';
+                    xlab_txt{2}=['              Cyan line - Mean - 2.5 S.D. error'];
+                    xlab_txt{3}=[ '          Black line - Type I error criterion'];
+                    xlab_txt{4}=[pct_txt '% of thresholded spikes are from primary cluster'];
+                    xlab_txt{5}=[pct_txt_2 '% of spikes from primary cluster are past thresh'];
+                    xlabel(xlab_txt);
+
+                    plot(xl,TH_empirical_by_STD*[1 1],'c','linew',1)
+                    plot(xl,TH_empirical_by_type_1_error*[1 1],'k','linew',1)
+
+
+                elseif threshold_strategy==2
+                    xlabel('N');
+                    pct_error_noise_as_spikes=round(10000*n_noise_as_spikes/(n_spikes_as_spikes+n_noise_as_spikes))/100;
+                    pct_error_spikes_as_noise=round(10000*n_spikes_as_noise/n_in_spike_cluster)/100;
+                    text(xl(1)+.1*diff(xl),yl(2)-.1*diff(yl),[num2str(pct_error_noise_as_spikes) '% thresholded spikes actually from other cluster(s)' ])
+                    text(xl(1)+.1*diff(xl),yl(2)-.2*diff(yl),[num2str(pct_error_spikes_as_noise) '% from biggest spike cluster excluded by threshold' ])
+                end
+                subplot(2,9,4:7);xl=get(gca,'xlim');
+                plot(xl,TH_empirical*[1 1],'m--','linew',2)
+
+                ids_all_past_TH_empirical=find(abs(mags_resorted)>abs(TH_empirical));
+                spiketimes_from_recommended_TH=concat_spiketimes(ids_all_past_TH_empirical);
+
+                if show_timing
+                    disp(['Elapsed time computing threshold = ' num2str(toc)]);
                 end
             end
         end
