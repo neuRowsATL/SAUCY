@@ -324,20 +324,16 @@ classdef SAUCY < handle
 
             % Identify peaks of spikes
             % -----
-            id = find(dat > TH); % id of samples that are above threshold
-            sdx = diff(sign(diff(dat))); % this will be -2 one point before upward-pointing peak, +2 one point before downward-pointing peak, zero else
-            id2 = find(sdx < 0) + 1; % id2 is ids of UPWARD-POINTING PEAKS
-            
-            % first deriv not equal to zero - use this to prevent multiple spikes being assigned to truncated spikes
-            % so to be identified as a spike,  sample must be (1) above threshold (2) an upward-pointing peak and
-            % (3)  changing in value
+            id=find(dat>TH);                % id of samples that are above threshold
+            sdx=diff(sign(diff(dat)));    % this will be -2 one point before upward-pointing peak, +2 one point before downward-pointing peak, zero else
+            id2=find(sdx<0)+1;            % id2 is ids of upward-pointing peaks
             first_der=diff(dat);
-            not_constant=find(first_der);
-            id_peaks=intersect(id,id2);     
-            id_peaks=intersect(id_peaks,not_constant);
-            
-            % Identify threshold crossings
-            % -----
+            not_constant=find(first_der);   % first deriv not equal to zero - use this to prevent multiple spikes being assigned to truncated spikes
+            id_peaks=intersect(id,id2);     % so to be identified as a spike,  sample must be (1) above threshold (2) an upward-pointing peak and
+            id_peaks=intersect(id_peaks,not_constant);  % (3)  changing in value
+            %%%%%%%%%%%%%%%%%%55
+           
+            % aligns at threshold crossing, not peak
             id_crossings=find(diff(dat>TH)==1)+1;           % id of samples that first to cross threshold
 
             % # of peaks will be slightly higher than # crossings.  Below is a vector
@@ -345,7 +341,7 @@ classdef SAUCY < handle
             % for plotting only
             if use_crossing
                 for x=1:length(id_crossings)
-                    id_peaks_after_crossings(x,1) = min(id_peaks(find(id_peaks>id_crossings(x))));
+                    id_peaks_after_crossings(x,1)=min(id_peaks(find(id_peaks>id_crossings(x))));
                 end
             end
 
