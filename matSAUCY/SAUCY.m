@@ -42,6 +42,7 @@ classdef SAUCY < handle
         threshold = [] % Spike detection threshold
         TH_original % for plotting purposes only
         use_crossing % indicates whether to align to peaks or threshold
+        id_crossings
         nsamp_wave = [30 90]
         
         id_for_samp % ids for 1 s of sample data in middle of file
@@ -286,15 +287,8 @@ classdef SAUCY < handle
         end
         
         % ----- ----- ----- ----- -----
-        % Set spike times based on outside source
-        function set_spikes_times(S, spike_times)
-            
-            
-        end
-        
-        % ----- ----- ----- ----- -----
-        % Extract spike waveforms aligned by peak or threshold crossing
-        function set_spike_mat(S, alignment)
+        % Set spike times
+        function set_spikes_times(S, alignment, spike_times)
             % Identify spike peaks (copied from neural_and_song.m)
             % alignment             Specify how to align spikes
             %       peaks           Align spikes by peak
@@ -303,12 +297,14 @@ classdef SAUCY < handle
             % If no alignment mode is specified, ALIGN SPIKES TO PEAKS
             if nargin == 1
                 S.use_crossing = false;
+                spike_times = [];
             elseif nargin == 2
                 if strcmp(alignment, 'peaks') % use peaks to align spikes
                     S.use_crossing = false;
                 elseif strcmp(alignment, 'threshold') % use threshold crossing to align spikes
                     S.use_crossing = true;
                 end
+                spike_times = [];
             end
 
             dat = S.data.amplifier_data_filt;
@@ -344,7 +340,76 @@ classdef SAUCY < handle
                     id_peaks_after_crossings(x,1)=min(id_peaks(find(id_peaks>id_crossings(x))));
                 end
             end
+            S.id_crossings = id_crossings;
+            
+        end
+        
+        % ----- ----- ----- ----- -----
+        % Extract spike waveforms
+        function set_spike_mat(S)
+            dat = S.dat;
+            TH = S.threshold;
+            vert_spike_lims = S.vert_spike_lims;
+            id_peaks = S.id_peaks;
+            nsamp_wave = S.nsamp_wave;
+            invert_sign = S.invert_sign;
+            
+            % first, disinclude peaks too close to start or end of file
+            id_peaks=id_peaks(find(id_peaks>nsamp_wave(1) & id_peaks<(length(dat)-nsamp_wave(2))));
 
+            % id_before_peaks is a vector of the indexes of datapoints before the
+            % peaks
+            id_before_peaks=zeros(nsamp_wave(1),length(id_peaks));  % do memory allocation all at once
+            id_before_peaks(1,:)=id_peaks-1;
+            for x=2:nsamp_wave(1)
+                id_before_peaks(x,:)=id_peaks-x;
+            end
+            % here, we orgainze these into a matrix:
+            % each row is a sample number before peak
+            % each column in for one entry in id_peaks
+            id_before_peaks_mat=reshape(id_before_peaks,nsamp_wave(1),length(id_peaks));
+
+            % id_before_peaks is a vector of the indexes of all datapoints withing
+            % nsampe_wave of the peaks
+            id_whole_waveform=zeros(sum(nsamp_wave)+1,length(id_peaks));% do memory allocation all at once - speeds things up
+            id_whole_waveform(1,:)=id_peaks-nsamp_wave(1);
+            for x=[-1*nsamp_wave(1)+1:nsamp_wave(2)]
+                id_whole_waveform(x+nsamp_wave(1)+1,:)=id_peaks+x;
+            end
+
+            % at least one point before peak must be below threshold - this finds
+            % ids of the waveforms that contain no violations
+            id_before_peaks_mat_AND_below_TH=find(sum(dat(id_before_peaks_mat)*invert_sign<TH));
+            if vert_spike_lims(1)~=0
+                id_no_vert_limit_violation=find(~sum(dat(id_whole_waveform)*invert_sign<vert_spike_lims(1)) & ~sum(dat(id_whole_waveform)*invert_sign>vert_spike_lims(2)));
+            else % (if vertical limits not set, include all)
+                [tmp,c]=size(id_before_peaks_mat);
+                id_no_vert_limit_violation=1:c;
+            end
+
+            % ids of waveforms that pass both tests
+            ids_all_crit=intersect(id_peaks(id_before_peaks_mat_AND_below_TH),id_peaks(id_no_vert_limit_violation));
+
+            % assemble waveforms into a matrix
+            id_waveforms_included=zeros(length(ids_all_crit),sum(nsamp_wave)+1);% do memory allocation all at once - speeds things up
+            id_waveforms_included(:,1)=dat(ids_all_crit-nsamp_wave(1));
+            for x=[-1*nsamp_wave(1)+1:nsamp_wave(2)]
+                id_waveforms_included(:,x+nsamp_wave(1)+1)=dat(ids_all_crit+x);
+            end
+
+            % each row is a sample number before peak
+            % each column in for one entry in id_peaks
+            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            % BC Updated: 2/21/2018
+            %spike_mat=reshape(id_waveforms_included,length(id_waveforms_included),sum(nsamp_wave)+1);
+            S.spike_mat=reshape(id_waveforms_included, size(id_waveforms_included,1), sum(nsamp_wave)+1);
+            S.id_peaks_save=ids_all_crit';
+            
+        end
+        
+        % ===== ===== ===== ===== =====
+        % Do clustering using kmeans
+        function do_clustering(S, n_clusters)
             %  Un-inverting waveform
             if S.inv_sign == -1
                 dat = -S.data.amplifier_data_filt;
@@ -392,10 +457,12 @@ classdef SAUCY < handle
                             % appear on disply - i think the negative of how they are
                             % actually used with the inverted waveform
                             disp('Hack to preserve sign of vert_spike_lims when running in batchmode')
-                            [spike_mat,id_peaks_save]=generate_spike_mat(dat,TH,sort(invert_sign*vert_spike_lims),id_peaks,nsamp_wave,invert_sign);
+                            S.set_spike_mat(dat,TH,sort(invert_sign*vert_spike_lims),id_peaks,nsamp_wave,invert_sign);
                         else
-                            [spike_mat,id_peaks_save]=generate_spike_mat(dat,TH,vert_spike_lims,id_crossings,nsamp_wave,invert_sign);
+                            S.set_spike_mat(dat,TH,vert_spike_lims,id_crossings,nsamp_wave,invert_sign);
                         end
+                        spike_mat = S.spike_mat;
+                        id_peaks_save = S.id_peaks_save;
                     end
                     
                     save spike_mat_tmp spike_mat
@@ -693,12 +760,6 @@ classdef SAUCY < handle
                     set(gca,'xlim',[min(xdat) max(xdat)]);
                 end
             end
-        end
-        
-        % ===== ===== ===== ===== =====
-        % Do clustering using kmeans
-        function do_clustering(S, n_clusters)
-            
         end
         
         % ===== ===== ===== ===== =====
