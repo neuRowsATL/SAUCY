@@ -24,9 +24,8 @@ classdef SAUCY < handle
         chan = []
         
         n_clusters = 2 % number of clusters to detect
-        IDX % Indices of clusters for spike_mat
-        SCORE % Score from PCA
-        C % #IDK
+        PCA = {}
+        kMeans = {}
         
         Fs % sampling rate of recording
         F_low % low cut off
@@ -38,7 +37,7 @@ classdef SAUCY < handle
         
         alignment % how are spike times aligned? peak or threshold?
         threshold = [] % Spike detection threshold
-        id_spikes = []
+        spike_ids = []
         nsamp_wave = [30 90] % how many indices to include in spike_mat
         
         % Bookkeeping variables
@@ -74,7 +73,7 @@ classdef SAUCY < handle
         % ----- ----- ----- ----- -----
         % Get 1 second of sample data
         % Returns 1 second of sample data [t, wav]
-        function [t_dat, wav_dat] = get_second_samp(S)
+        function [t_dat wav_dat] = get_second_samp(S)
             dat = S.data.amplifier_data_filt;
             Fs = S.Fs;
             
@@ -90,7 +89,7 @@ classdef SAUCY < handle
                 id_for_samp=1:length(dat);    
             end
 
-            t_dat = S.t_amplifier(id_for_samp);
+            t_dat = S.raw_data.t_amplifier(id_for_samp);
             wav_dat = S.data.amplifier_data_filt(id_for_samp);
         end
         
@@ -224,10 +223,10 @@ classdef SAUCY < handle
             end
             
             % Plot waveform sample for user selection of threshold
-            [ts wav_samp] = S.get_second_samp(S);
+            [ts wav_samp] = S.get_second_samp();
             figure();
             plot(ts, wav_samp, 'k');
-            set(gca,'xlim',[0 max(ts)]);
+            set(gca,'xlim',[min(ts) max(ts)]);
 
             % Prompt user to select threshold
             t_str{1}='Left-click twice between noise and large spike peaks';
@@ -342,7 +341,7 @@ classdef SAUCY < handle
             Fs = S.Fs;
             nsamp_wave = S.nsamp_wave;
             
-            invert_sign = S.invert_sign;
+            invert_sign = S.inv_sign;
             
             if S.verbose > 1
                 show_timing = true;
@@ -451,8 +450,10 @@ classdef SAUCY < handle
             end
 
             TH = S.threshold;
+            Fs = S.Fs;
             invert_sign = S.inv_sign;
             n_clusters = S.n_clusters;
+            spike_ids = S.spike_ids;
             
             % Extract spike waveforms and establish vertical and horizontal
             % limits
@@ -460,6 +461,12 @@ classdef SAUCY < handle
             col_vec = S.col_vec;
             col_mat = S.col_mat;
 
+            if S.verbose > 1
+                show_timing = true;
+            else
+                show_timing = false;
+            end
+            
             finished = false;
             
             vert_spike_lims_approved = false;
@@ -469,6 +476,8 @@ classdef SAUCY < handle
             replot = true;
             first_plotting = true;
             
+            spike_ids = [];
+            
             % [# samples before peak        # after peak] to subject to PCA (these are
             % defaults, user will be able to adjust these below)
             nsamp_wave = S.nsamp_wave;
@@ -477,7 +486,7 @@ classdef SAUCY < handle
             while ~finished
                 if redo_peaks
                     % =====>> WHAT DOES THIS LINE DO?
-                    id_peaks = id_peaks(find(id_peaks>(nsamp_wave(1)+1)  & id_peaks<(length(dat)-nsamp_wave(2))));
+                    % id_peaks = id_peaks(find(id_peaks>(nsamp_wave(1)+1)  & id_peaks<(length(dat)-nsamp_wave(2))));
                     
                     if show_timing
                         tic;
@@ -490,7 +499,7 @@ classdef SAUCY < handle
                         % appear on disply - i think the negative of how they are
                         % actually used with the inverted waveform
                         disp('Hack to preserve sign of vert_spike_lims when running in batchmode')
-                        [spike_mat id_spikes_save] = S.set_spike_mat(S, S.alignment, spike_ids, vert_spike_lims);
+                        [spike_mat id_peaks_save] = S.set_spike_mat(S.alignment, spike_ids, vert_spike_lims);
                     end
                     
                     save spike_mat_tmp spike_mat
@@ -501,12 +510,12 @@ classdef SAUCY < handle
                         disp(['Elapsed time generating spike_mat= ' num2str(toc)]);
                     end
 
-                    %     PRINCOMP(spike_mat) performs PCA on the N-by-P matrix of spikes  and returns the principal component coefficients
-                    %     Each row of spike_mat is a waveform   COEFF is a P-by-P matrix, each column containing coefficients
-                    %     for one principal component.  The columns are in order of decreasing   component variance.
+                    % PRINCOMP(spike_mat) performs PCA on the N-by-P matrix of spikes  and returns the principal component coefficients
+                    % Each row of spike_mat is a waveform   COEFF is a P-by-P matrix, each column containing coefficients
+                    % for one principal component.  The columns are in order of decreasing   component variance.
                     %
                     % SCORE is the representation of X in the principal component space
-                    %  Rows of SCORE correspond to observations, columns to components
+                    % Rows of SCORE correspond to observations, columns to components
                     
                     if show_timing
                         tic;
@@ -516,19 +525,20 @@ classdef SAUCY < handle
                     % BC: 4/12/2018
                     % Modified: UPDATED FUNCTION CALL
                     % [COEFF, SCORE,LATENT] = princomp(spike_mat);
-                    [COEFF, SCORE,LATENT] = pca(spike_mat);
-                    S.SCORE = SCORE;
-                    
+                    [COEFF, SCORE, LATENT] = pca(spike_mat);
+                    S.PCA.coeff = COEFF;
+                    S.PCA.score = SCORE;
+                    S.PCA.latent = LATENT;
                     
                     if show_timing
                         disp(['Elapsed time running PCA= ' num2str(toc)]);
                     end
 
-                    %             % run this on the file used to set prefs to show that it works
-                    %                         [n,p] = size(spike_mat);
-                    %                         % subtract mean from each column of spike_mat
-                    %                         spike_mat_x0 = spike_mat- repmat(mean(spike_mat,1),n,1);tmp_SCORE=spike_mat_x0*Data.COEFF_matrix;
-                    %                         tmp_SCORE(1:5,1:5);SCORE(1:5,1:5)
+                    % %run this on the file used to set prefs to show that it works
+                    % [n,p] = size(spike_mat);
+                    % %subtract mean from each column of spike_mat
+                    % spike_mat_x0 = spike_mat- repmat(mean(spike_mat,1),n,1);tmp_SCORE=spike_mat_x0*Data.COEFF_matrix;
+                    % tmp_SCORE(1:5,1:5);SCORE(1:5,1:5)
             
                     if show_timing
                         tic;
@@ -539,17 +549,18 @@ classdef SAUCY < handle
                     % components
                     
                     [IDX,C] = kmeans(SCORE(:,1:2), n_clusters);
-                    S.IDX = IDX;
+                    S.kMeans.idx = IDX;
+                    S.kMeans.C = C;
                     
                     if show_timing
                         disp(['Elapsed time grouping points= ' num2str(toc)]);
                     end
 
-
                     for x=1:n_clusters
                         wave_tmp=mean_wave+C(x,:)*COEFF(:,1:2)';
                         max_abs_wave(x)=max(abs(wave_tmp));
                     end
+                    
                     % determine relative spike sizes to differentiate noise from spike
                     % waves
                     [tmp,wave_id_by_size]=sort(max_abs_wave);
@@ -567,14 +578,12 @@ classdef SAUCY < handle
                         C(x,:)=C_old(wave_id_by_size(x),:);
                     end
                     
-                    S.C = C;
-                    
                     for x=1:n_clusters
                         % CHECK if this is right - component{x} will drift as mean centers
                         % do
                         % component{x} is the waveform reconstructed using only the
                         % mean of the first two principle components (cluster centers).
-                        component{x}=mean_wave+C(x,:)*COEFF(:,1:2)';
+                        component{x} = mean_wave+C(x,:)*COEFF(:,1:2)';
                     end
 
                     %%%%%%%%%%%%%%%%%%%
@@ -783,7 +792,7 @@ classdef SAUCY < handle
                     finished = true;
                     
                     S.spike_mat = spike_mat;
-                    S.id_peaks_save = id_peaks_save;
+                    S.spike_ids = id_peaks_save;
                     
                     set(gca,'xlim',[min(xdat) max(xdat)]);
                 end
@@ -1389,7 +1398,7 @@ classdef SAUCY < handle
             % ----->> NEED TO SET UP DEFAULT ARGUMENTS FOR FUNCTIONS
             filter_data(S);
             set_threshold(S);
-            set_spike_mat(S);
+            do_clustering(S);
             optimize_clusters(S);
         end
     end
