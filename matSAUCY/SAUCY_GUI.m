@@ -9,20 +9,38 @@ classdef SAUCY_GUI
     %   interactive framework.
     
     properties
+        gui_name % name of gui instance
+        
+        master_window % handle to master figure window
+        
+        tab_files % tab to manage data files
+        tab_wavArray % tab for showing array data
+        tab_spikeDetection % tab for showing spike detection
+        tab_spikeClustering % tab for showing spike clustering
+        tab_validation % tab to show validation plots
+        
         saucy_objs = []; % list of SAUCY objects
     end
     
     methods
-        function obj = untitled2(inputArg1,inputArg2)
-            %UNTITLED2 Construct an instance of this class
-            %   Detailed explanation goes here
-            obj.Property1 = inputArg1 + inputArg2;
-        end
-        
-        function outputArg = method1(obj,inputArg)
-            %METHOD1 Summary of this method goes here
-            %   Detailed explanation goes here
-            outputArg = obj.Property1 + inputArg;
+        function gui = SAUCY_GUI(gui_namDe)
+            gui.gui_name = gui_name;
+            fig = uifigure('Visible', 'Off', 'Position', [50, 50, 1500, 900]);
+            fig.Name = gui_name;
+            set(fig, 'MenuBar', 'none');
+            set(fig, 'ToolBar', 'none');
+            
+            tgroup = uitabgroup('Parent', fig);
+            
+            gui.tab_files = uitab('Parent', tgroup, 'Title', 'Data Files');
+            gui.tab_wavArray = uitab('Parent', tgroup, 'Title', 'Array Data');
+            gui.tab_spikeDetection = uitab('Parent', tgroup, 'Title', 'Detection');
+            gui.tab_spikeClustering = uitab('Parent', tgroup, 'Title', 'Clustering');
+            gui.tab_validation = uitab('Parent', tgroup, 'Title', 'Validation');
+            
+            gui.master_window = fig;
+            movegui(fig, 'center');
+            fig.Visible = 'on';
         end
     end
 end
