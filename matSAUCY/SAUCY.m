@@ -8,12 +8,13 @@ classdef SAUCY < handle
         verbose = 0 % level of verbose output
         warning_str = [];
         
-        experiment_name = '' % base name of experiment
+        experiment_name = ''; % base name of experiment
         
-        data_path = '' % path to data files
-        fname_intan = '' % full file name of intan file
-        fname_cbin = '' % full file name of cbin file
-        fname_neuralnot = '' % full file name of neural_not file
+        data_path = ''; % path to data files
+        fname_mat = ''; % full file name of .mat file
+        fname_intan = ''; % full file name of .rhd (Intan) file
+        fname_cbin = ''; % full file name of .cbin file
+        fname_neuralnot = ''; % full file name of .neuralnot.mat file
         
         col_vec='rgbc';
         col_mat=[1 0 0;0 1 0;0 0 1;1 1 0];
@@ -21,38 +22,39 @@ classdef SAUCY < handle
         % chan          Channel number(s) for analysis
         %   as INT      Single channel will be used
         %   as TUPLE    Channel subtraction will be used [a b] = a - b
-        chan = []
+        chan = [];
         
-        n_clusters = 2 % number of clusters to detect
-        IDX % Indices of clusters for spike_mat
-        SCORE % Score from PCA
-        C % #IDK
+        n_clusters = 2; % number of clusters to detect
+        PCA = {};
+        kMeans = {};
         
-        Fs = 30000 % sampling rate of recording
-        F_low = 350 % low cut off
-        F_high = 7000 % hi cut off
-        filter_type = 'hanningfir' % type of filter to apply
+        Fs % sampling rate of recording
+        F_low % low cut off
+        F_high % hi cut off
+        filter_type % type of filter to apply
         
-        raw_data = {} % struct for raw data 
-        data = {} % struct for results
+        raw_data = {}; % struct for raw data 
+        data = {}; % struct for results
         
-        inv_sign % indicates whether waveform is inverted
-        inv_waveform % indicates whether waveform has been inverted or not
+        alignment % how are spike times aligned? peak or threshold?
+        threshold = []; % Spike detection threshold
+        spike_ids = [];
+        nsamp_wave = [30 90]; % how many indices to include in spike_mat
         
-        threshold = [] % Spike detection threshold
+        % Bookkeeping variables
         TH_original % for plotting purposes only
-        use_crossing % indicates whether to align to peaks or threshold
-        id_crossings
-        nsamp_wave = [30 90]
+        inv_sign = 1; % indicates whether waveform is inverted
+        inv_waveform = 1; % indicates whether waveform has been inverted or not
         
-        id_for_samp % ids for 1 s of sample data in middle of file
         spike_mat % matrix of spike waveforms
-        id_peaks_save % id of peaks... ?
     end
     
     methods
         % ----- ----- ----- ----- -----
         % Initialize SAUCY object
+        % Sets variables:
+        %       experiment_name
+        %       chan
         function S = SAUCY(experiment_name, chan)
             S.experiment_name = experiment_name;
             S.chan = chan;
@@ -70,23 +72,68 @@ classdef SAUCY < handle
         end
         
         % ----- ----- ----- ----- -----
+        % Get 1 second of sample data
+        % Returns 1 second of sample data [t, wav]
+        function [output] = get_second_samp(S)
+            dat = S.data.amplifier_data_filt;
+            Fs = S.Fs;
+            
+            % BC ----->> MIGHT NEED TO RECALIBRATE THIS IF SPIKES ARE SPARSE
+            % IN FILE
+            
+            % Selects 1 second of data from the middle of the file
+            % If data is shorter than 1 sec, uses all of data
+            mid_dat=round(length(dat)/2)-Fs/2;
+            if length(dat)/Fs > 1
+                id_for_samp=mid_dat:(mid_dat+Fs-1);    
+            else
+                id_for_samp=1:length(dat);    
+            end
+
+            t_dat = S.raw_data.t_amplifier(id_for_samp);
+            wav_dat = S.data.amplifier_data_filt(id_for_samp);
+            
+            output.ts = t_dat;
+            output.wav = wav_dat;
+            output.ixs = id_for_samp;
+        end
+        
+        % ----- ----- ----- ----- -----
         % Load data into SAUCY object
+        % Sets variables:
+        %       raw_data = {t_amplifier, t_board_adc, amplifier_data,
+        %           board_adc_data}
+        %       data = {filt}
+        %       Fs
+        %       fname_intan
         function load_data(S, filename)
             if strfind(filename, '.rhd') > 0
+                %%%%% ADD CODE TO SAVE .mat FILE FOR QUICK ACCESS
+                basename = split(filename, '.');
+                S.fname_intan = filename;
+                S.fname_mat = strcat(basename{1}, '.mat');
+                
+                if ~exist(S.fname_mat, 'file')
+                    disp(['No .mat file found.', newline]);
+                    disp(['Converting .rhd file to .mat file', newline]);
+                    read_Intan_nongui(filename);
+                end
+                
                 % Load data from .rhd file
-                [t_amplifier, t_board_adc, amplifier_data, board_adc_data, frequency_parameters] = ...
-                   read_Intan_RHD2000_nongui_saucy(filename);
-                S.raw_data.t_amplifier = t_amplifier;
-                S.raw_data.t_board_adc = t_board_adc;
-                S.raw_data.amplifier_data = amplifier_data;
-                S.raw_data.board_adc_data = board_adc_data;
+%                 [t_amplifier, t_board_adc, amplifier_data, board_adc_data, frequency_parameters] = ...
+%                    read_Intan_RHD2000_nongui_saucy(filename);
+                disp(['Loading data...',newline]);
+                dat_tmp = load(S.fname_mat, 't_amplifier', 't_board_adc', 'amplifier_data', 'board_adc_data', 'frequency_parameters');
+                S.raw_data.t_amplifier = dat_tmp.t_amplifier;
+                S.raw_data.t_board_adc = dat_tmp.t_board_adc;
+                S.raw_data.amplifier_data = dat_tmp.amplifier_data;
+                S.raw_data.board_adc_data = dat_tmp.board_adc_data;
                 
                 % Set default data for analysis
                 S.data.amplifier_data_filt = S.raw_data.amplifier_data(S.chan,:);
                
-                S.Fs = frequency_parameters.amplifier_sample_rate;
+                S.Fs = dat_tmp.frequency_parameters.amplifier_sample_rate;
                
-                S.fname_intan = filename;
                
                 if S.verbose > 1
                     disp(['Successfully loaded Intan file: ', filename]);
@@ -110,14 +157,30 @@ classdef SAUCY < handle
         
         % ----- ----- ----- ----- -----
         % Filter data if specified
-        function filter_data(S, f_specs)
+        % Sets variables:
+        %       F_low
+        %       F_high
+        %       filter_type
+        function filter_data(S, f_specs, filter_type)
             if nargin == 1
                 disp('!! USING DEFAULT BANDPASS LIMITS [350 7000] !!');
+                disp('!! USING DEFAULT FILTER TYPE: hanningfir !!');
+                S.F_low = 350;
+                S.F_high = 7000;
+                S.filter_type = 'hanningfir';
             elseif nargin == 2
                 if length(f_specs) == 2
                     S.F_low = f_specs(1);
                     S.F_high = f_specs(2);
                 end
+                disp('!! USING DEFAULT FILTER TYPE: hanningfir !!');
+                S.filter_type = 'hanningfir';
+            elseif nargin == 3
+                if length(f_specs) == 2
+                    S.F_low = f_specs(1);
+                    S.F_high = f_specs(2);
+                end
+                S.filter_type = filter_type;
             else
                 error('Unable to figure out filter parameters.');    
             end
@@ -139,8 +202,12 @@ classdef SAUCY < handle
         end
         
         % ----- ----- ----- ----- -----
-        % Set threshold for spike detection
-        function set_threshold(S, data_source, std_th)
+        % Set threshold for spike detection using SAUCY interface
+        % Sets variables:  
+        %       threshold, TH_original
+        %       inv_sign
+        %       inv_waveform
+        function set_user_threshold(S, data_source, std_th)
             % data_source       filt        Uses filtered data
             %                   raw         Uses raw data
             
@@ -171,27 +238,15 @@ classdef SAUCY < handle
             else
                 disp('ERROR: Invalid data source format.');
             end
-                
-            Fs = S.Fs;
-            
-            % BC ----->> MIGHT NEED TO RECALIBRATE THIS IF SPIKES ARE SPARSE
-            % IN FILE
-            
-            % Selects 1 second of data from the middle of the file
-            % If data is shorter than 1 sec, uses all of data
-            mid_dat=round(length(dat)/2)-Fs/2;
-            if length(dat)/Fs > 1
-                id_for_samp=mid_dat:(mid_dat+Fs-1);    
-            else
-                id_for_samp=1:length(dat);    
-            end
-
-            S.id_for_samp = id_for_samp;
             
             % Plot waveform sample for user selection of threshold
+            samp_dat = S.get_second_samp();
+            ts = samp_dat.ts;
+            wav_samp = samp_dat.wav;
+            
             figure();
-            plot([1:length(id_for_samp)]/Fs, dat(id_for_samp), 'k');
-            set(gca,'xlim',[0 length(id_for_samp)/Fs]);
+            plot(ts, wav_samp, 'k');
+            set(gca,'xlim',[min(ts) max(ts)]);
 
             % Prompt user to select threshold
             t_str{1}='Left-click twice between noise and large spike peaks';
@@ -248,7 +303,7 @@ classdef SAUCY < handle
                 disp(['Computed TH = ' num2str(TH) ' (MEAN - ' num2str(n_SD_for_TH) '*SD)'])
             end
             
-            S.TH_original = TH;
+            S.TH_original = TH; % holds track of original threshold value
             S.threshold = TH;
             
             % BC ----->> WHY INVERT AND THEN UN-INVERT?!?
@@ -287,30 +342,28 @@ classdef SAUCY < handle
         end
         
         % ----- ----- ----- ----- -----
-        % Set spike times
-        function set_spikes_times(S, alignment, spike_times)
+        % Extract spike waveforms
+        % Sets variables:
+        %       alignment
+        function [spike_mat id_spikes] = set_spike_mat(S, alignment, spike_ids, vert_spike_lims)
             % Identify spike peaks (copied from neural_and_song.m)
-            % alignment             Specify how to align spikes
+            %   alignment           Specify how to align spikes
             %       peaks           Align spikes by peak
             %       threshold       Align spikes by threshold crossing
+            %   spike_ids           IDs of spikes
+            %   vert_spike_lims     Carried from original SAUCY
             
             % If no alignment mode is specified, ALIGN SPIKES TO PEAKS
             if nargin == 1
-                S.use_crossing = false;
-                spike_times = [];
-            elseif nargin == 2
-                if strcmp(alignment, 'peaks') % use peaks to align spikes
-                    S.use_crossing = false;
-                elseif strcmp(alignment, 'threshold') % use threshold crossing to align spikes
-                    S.use_crossing = true;
-                end
-                spike_times = [];
+                S.alignment = 'peak';
             end
 
             dat = S.data.amplifier_data_filt;
             TH = S.threshold;
-            use_crossing = S.use_crossing;
             Fs = S.Fs;
+            nsamp_wave = S.nsamp_wave;
+            
+            invert_sign = S.inv_sign;
             
             if S.verbose > 1
                 show_timing = true;
@@ -318,58 +371,60 @@ classdef SAUCY < handle
                 show_timing = false;
             end
 
-            % Identify peaks of spikes
-            % -----
-            id=find(dat>TH);                % id of samples that are above threshold
-            sdx=diff(sign(diff(dat)));    % this will be -2 one point before upward-pointing peak, +2 one point before downward-pointing peak, zero else
-            id2=find(sdx<0)+1;            % id2 is ids of upward-pointing peaks
-            first_der=diff(dat);
-            not_constant=find(first_der);   % first deriv not equal to zero - use this to prevent multiple spikes being assigned to truncated spikes
-            id_peaks=intersect(id,id2);     % so to be identified as a spike,  sample must be (1) above threshold (2) an upward-pointing peak and
-            id_peaks=intersect(id_peaks,not_constant);  % (3)  changing in value
-            %%%%%%%%%%%%%%%%%%55
-           
-            % aligns at threshold crossing, not peak
-            id_crossings=find(diff(dat>TH)==1)+1;           % id of samples that first to cross threshold
+            if nargin == 2 | (nargin == 4 & length(spike_ids) == 0)
+                S.alignment = alignment;
+                % Identify peaks of spikes
+                % -----
+                id = find(dat>TH);                % id of samples that are above threshold
+                sdx = diff(sign(diff(dat)));    % this will be -2 one point before upward-pointing peak, +2 one point before downward-pointing peak, zero else
 
-            % # of peaks will be slightly higher than # crossings.  Below is a vector
-            % of id_peaks that fall immediately after each threshold crossing.  This is
-            % for plotting only
-            if use_crossing
-                for x=1:length(id_crossings)
-                    id_peaks_after_crossings(x,1)=min(id_peaks(find(id_peaks>id_crossings(x))));
+                id2 = find(sdx<0)+1;            % id2 is ids of upward-pointing peaks
+                first_der = diff(dat);
+
+                not_constant = find(first_der);   % first deriv not equal to zero - use this to prevent multiple spikes being assigned to truncated spikes
+
+                % so to be identified as a spike,  sample must be:
+                % (1) above threshold
+                % (2) an upward-pointing peak and
+                % (3) changing in value
+                id_peaks = intersect(id,id2);     
+                id_peaks = intersect(id_peaks,not_constant);
+
+                if strcmp(S.alignment, 'threshold')
+                    % aligns at threshold crossing, not peak
+                    id_crossings = find(diff(dat>TH)==1)+1;           % id of samples that first to cross threshold
+
+                    % # of peaks will be slightly higher than # crossings.  Below is a vector
+                    % of id_peaks that fall immediately after each threshold crossing.  This is
+                    % <<===== FOR PLOTTING ONLY =====>>
+                    for x=1:length(id_crossings)
+                        id_peaks_after_crossings(x,1)=min(id_peaks(find(id_peaks>id_crossings(x))));
+                    end
+
+                    id_peaks = id_crossings;
                 end
+            elseif nargin == 3
+                id_peaks = spike_ids;
             end
-            S.id_crossings = id_crossings;
-            
-        end
-        
-        % ----- ----- ----- ----- -----
-        % Extract spike waveforms
-        function set_spike_mat(S)
-            dat = S.dat;
-            TH = S.threshold;
-            vert_spike_lims = S.vert_spike_lims;
-            id_peaks = S.id_peaks;
-            nsamp_wave = S.nsamp_wave;
-            invert_sign = S.invert_sign;
-            
+                  
+            % =====>> This section taken from generate_spike_mat.m
             % first, disinclude peaks too close to start or end of file
-            id_peaks=id_peaks(find(id_peaks>nsamp_wave(1) & id_peaks<(length(dat)-nsamp_wave(2))));
+            id_peaks = id_peaks(find(id_peaks>nsamp_wave(1) & id_peaks<(length(dat)-nsamp_wave(2))));
 
             % id_before_peaks is a vector of the indexes of datapoints before the
             % peaks
-            id_before_peaks=zeros(nsamp_wave(1),length(id_peaks));  % do memory allocation all at once
-            id_before_peaks(1,:)=id_peaks-1;
+            id_before_peaks = zeros(nsamp_wave(1),length(id_peaks));  % do memory allocation all at once
+            id_before_peaks(1,:) = id_peaks-1;
             for x=2:nsamp_wave(1)
-                id_before_peaks(x,:)=id_peaks-x;
+                id_before_peaks(x,:) = id_peaks-x;
             end
+            
             % here, we orgainze these into a matrix:
             % each row is a sample number before peak
             % each column in for one entry in id_peaks
             id_before_peaks_mat=reshape(id_before_peaks,nsamp_wave(1),length(id_peaks));
 
-            % id_before_peaks is a vector of the indexes of all datapoints withing
+            % id_before_peaks is a vector of the indexes of all datapoints within
             % nsampe_wave of the peaks
             id_whole_waveform=zeros(sum(nsamp_wave)+1,length(id_peaks));% do memory allocation all at once - speeds things up
             id_whole_waveform(1,:)=id_peaks-nsamp_wave(1);
@@ -389,7 +444,7 @@ classdef SAUCY < handle
 
             % ids of waveforms that pass both tests
             ids_all_crit=intersect(id_peaks(id_before_peaks_mat_AND_below_TH),id_peaks(id_no_vert_limit_violation));
-
+            
             % assemble waveforms into a matrix
             id_waveforms_included=zeros(length(ids_all_crit),sum(nsamp_wave)+1);% do memory allocation all at once - speeds things up
             id_waveforms_included(:,1)=dat(ids_all_crit-nsamp_wave(1));
@@ -402,14 +457,13 @@ classdef SAUCY < handle
             %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
             % BC Updated: 2/21/2018
             %spike_mat=reshape(id_waveforms_included,length(id_waveforms_included),sum(nsamp_wave)+1);
-            S.spike_mat=reshape(id_waveforms_included, size(id_waveforms_included,1), sum(nsamp_wave)+1);
-            S.id_peaks_save=ids_all_crit';
-            
+            spike_mat = reshape(id_waveforms_included, size(id_waveforms_included,1), sum(nsamp_wave)+1);
+            id_spikes = ids_all_crit';
         end
         
         % ===== ===== ===== ===== =====
         % Do clustering using kmeans
-        function do_clustering(S, n_clusters)
+        function do_clustering(S, n_clusters, spike_ids)
             %  Un-inverting waveform
             if S.inv_sign == -1
                 dat = -S.data.amplifier_data_filt;
@@ -418,15 +472,33 @@ classdef SAUCY < handle
             end
 
             TH = S.threshold;
+            Fs = S.Fs;
             invert_sign = S.inv_sign;
-            n_clusters = S.n_clusters;
             
+            if nargin == 1
+                n_clusters = S.n_clusters;
+                spike_ids = S.spike_ids;
+            elseif nargin == 2
+                spike_ids = S.spike_ids;
+            elseif nargin == 3
+                disp(['Setting user-defined spike times',newline]);
+            else
+                error("Too many arguments in do_clustering()");
+            end
+                
+                
             % Extract spike waveforms and establish vertical and horizontal
             % limits
             % -----
             col_vec = S.col_vec;
             col_mat = S.col_mat;
 
+            if S.verbose > 1
+                show_timing = true;
+            else
+                show_timing = false;
+            end
+            
             finished = false;
             
             vert_spike_lims_approved = false;
@@ -436,14 +508,18 @@ classdef SAUCY < handle
             replot = true;
             first_plotting = true;
             
+            spike_ids = [];
+            
             % [# samples before peak        # after peak] to subject to PCA (these are
             % defaults, user will be able to adjust these below)
             nsamp_wave = S.nsamp_wave;
             vert_spike_lims=[0 0]; % use vertical limits to cut off mvmt artifact (default is not to use these)
-                    
+            id_peaks_save = [];        
+            
             while ~finished
                 if redo_peaks
-                    id_peaks = id_peaks(find(id_peaks>(nsamp_wave(1)+1)  & id_peaks<(length(dat)-nsamp_wave(2))));
+                    % =====>> WHAT DOES THIS LINE DO?
+                    % id_peaks = id_peaks(find(id_peaks>(nsamp_wave(1)+1)  & id_peaks<(length(dat)-nsamp_wave(2))));
                     
                     if show_timing
                         tic;
@@ -451,18 +527,12 @@ classdef SAUCY < handle
                     end
 
                     if ~exist('spike_mat')  % a new trick - only run generate_spike_mat once
-                        if ~use_crossing
-                            % vert_spike_lims are [0 0] when this is called
-                            % When re-called in batchmode, vert limits are as they
-                            % appear on disply - i think the negative of how they are
-                            % actually used with the inverted waveform
-                            disp('Hack to preserve sign of vert_spike_lims when running in batchmode')
-                            S.set_spike_mat(dat,TH,sort(invert_sign*vert_spike_lims),id_peaks,nsamp_wave,invert_sign);
-                        else
-                            S.set_spike_mat(dat,TH,vert_spike_lims,id_crossings,nsamp_wave,invert_sign);
-                        end
-                        spike_mat = S.spike_mat;
-                        id_peaks_save = S.id_peaks_save;
+                        % vert_spike_lims are [0 0] when this is called
+                        % When re-called in batchmode, vert limits are as they
+                        % appear on disply - i think the negative of how they are
+                        % actually used with the inverted waveform
+                        disp([newline, 'Hack to preserve sign of vert_spike_lims when running in batchmode', newline])
+                        [spike_mat id_peaks_save] = S.set_spike_mat(S.alignment, spike_ids, vert_spike_lims);
                     end
                     
                     save spike_mat_tmp spike_mat
@@ -473,12 +543,12 @@ classdef SAUCY < handle
                         disp(['Elapsed time generating spike_mat= ' num2str(toc)]);
                     end
 
-                    %     PRINCOMP(spike_mat) performs PCA on the N-by-P matrix of spikes  and returns the principal component coefficients
-                    %     Each row of spike_mat is a waveform   COEFF is a P-by-P matrix, each column containing coefficients
-                    %     for one principal component.  The columns are in order of decreasing   component variance.
+                    % PRINCOMP(spike_mat) performs PCA on the N-by-P matrix of spikes  and returns the principal component coefficients
+                    % Each row of spike_mat is a waveform   COEFF is a P-by-P matrix, each column containing coefficients
+                    % for one principal component.  The columns are in order of decreasing   component variance.
                     %
                     % SCORE is the representation of X in the principal component space
-                    %  Rows of SCORE correspond to observations, columns to components
+                    % Rows of SCORE correspond to observations, columns to components
                     
                     if show_timing
                         tic;
@@ -488,19 +558,20 @@ classdef SAUCY < handle
                     % BC: 4/12/2018
                     % Modified: UPDATED FUNCTION CALL
                     % [COEFF, SCORE,LATENT] = princomp(spike_mat);
-                    [COEFF, SCORE,LATENT] = pca(spike_mat);
-                    S.SCORE = SCORE;
-                    
+                    [COEFF, SCORE, LATENT] = pca(spike_mat);
+                    S.PCA.coeff = COEFF;
+                    S.PCA.score = SCORE;
+                    S.PCA.latent = LATENT;
                     
                     if show_timing
                         disp(['Elapsed time running PCA= ' num2str(toc)]);
                     end
 
-                    %             % run this on the file used to set prefs to show that it works
-                    %                         [n,p] = size(spike_mat);
-                    %                         % subtract mean from each column of spike_mat
-                    %                         spike_mat_x0 = spike_mat- repmat(mean(spike_mat,1),n,1);tmp_SCORE=spike_mat_x0*Data.COEFF_matrix;
-                    %                         tmp_SCORE(1:5,1:5);SCORE(1:5,1:5)
+                    % %run this on the file used to set prefs to show that it works
+                    % [n,p] = size(spike_mat);
+                    % %subtract mean from each column of spike_mat
+                    % spike_mat_x0 = spike_mat- repmat(mean(spike_mat,1),n,1);tmp_SCORE=spike_mat_x0*Data.COEFF_matrix;
+                    % tmp_SCORE(1:5,1:5);SCORE(1:5,1:5)
             
                     if show_timing
                         tic;
@@ -511,17 +582,18 @@ classdef SAUCY < handle
                     % components
                     
                     [IDX,C] = kmeans(SCORE(:,1:2), n_clusters);
-                    S.IDX = IDX;
+                    S.kMeans.idx = IDX;
+                    S.kMeans.C = C;
                     
                     if show_timing
                         disp(['Elapsed time grouping points= ' num2str(toc)]);
                     end
 
-
                     for x=1:n_clusters
                         wave_tmp=mean_wave+C(x,:)*COEFF(:,1:2)';
                         max_abs_wave(x)=max(abs(wave_tmp));
                     end
+                    
                     % determine relative spike sizes to differentiate noise from spike
                     % waves
                     [tmp,wave_id_by_size]=sort(max_abs_wave);
@@ -539,14 +611,12 @@ classdef SAUCY < handle
                         C(x,:)=C_old(wave_id_by_size(x),:);
                     end
                     
-                    S.C = C;
-                    
                     for x=1:n_clusters
                         % CHECK if this is right - component{x} will drift as mean centers
                         % do
                         % component{x} is the waveform reconstructed using only the
                         % mean of the first two principle components (cluster centers).
-                        component{x}=mean_wave+C(x,:)*COEFF(:,1:2)';
+                        component{x} = mean_wave+C(x,:)*COEFF(:,1:2)';
                     end
 
                     %%%%%%%%%%%%%%%%%%%
@@ -571,12 +641,16 @@ classdef SAUCY < handle
                     
                     clear spike_mat_tmp
                     
-                    % Make final plot showing waveforms and clusters
+                    % If vertical and horizontal limits are set, create
+                    % final plot to show waveforms.
+                    %
+                    % If both limits are not set, plot sample of waveforms
+                    % and prompt user to set vert/horiz limits.
                     % -----
                     if vert_spike_lims_approved & horiz_spike_lims_approved
                         close(gcf);
                         figure();
-                        %subplot(2,3,1);
+                        subplot(2,3,1);
                         
                         for z=1:n_clusters
                             id_tmp=find(IDX==z);
@@ -621,6 +695,7 @@ classdef SAUCY < handle
 
                         t_str{2}=['# waveforms - ' num2str(length(spike_mat)) ' only showing ' num2str(length(spike_mat_tmp{1})) ', chosen randomly'];
                     end
+                    
                     
                     xdat=[-nsamp_wave(1):nsamp_wave(2)]/(Fs./1000);% time in msec
                     
@@ -723,6 +798,7 @@ classdef SAUCY < handle
                         end
                         replot = true;
                         if redo_peaks
+                            disp([newline, 'redo peaks', newline]);
                             % The below is more efficient than re-generating spike_mat and
                             % id_peaks_save
                             %
@@ -732,6 +808,7 @@ classdef SAUCY < handle
                             clip_start=nsamp_wave_old(1)-nsamp_wave(1);
                             clip_end=nsamp_wave_old(2)-nsamp_wave(2);
                             [r_sp,c_sp]=size(spike_mat);
+                            
                             % clip out columns (time points) according to nsamp_wave
                             spike_mat_clipped=spike_mat(:,1+clip_start:c_sp-clip_end);
 
@@ -740,8 +817,10 @@ classdef SAUCY < handle
                             %                sum(potential_spike(1:nsamp_wave(1))*invert_sign<TH)
                             % in generate_spike_mat below
                             spike_mat_pre_peak=spike_mat_clipped(:,1:nsamp_wave(1));
+                            
                             % TH is positive, and so are peaks
                             spike_mat_pre_peak=spike_mat_pre_peak*invert_sign;
+                            
                             %            min(M,[],2) is min across rows matrix M
                             % id is rows of spike_mat_pre_peak that contain at least
                             % one value less than TH
@@ -755,10 +834,11 @@ classdef SAUCY < handle
                     finished = true;
                     
                     S.spike_mat = spike_mat;
-                    S.id_peaks_save = id_peaks_save;
+                    S.spike_ids = id_peaks_save;
                     
                     set(gca,'xlim',[min(xdat) max(xdat)]);
                 end
+                disp([newline, 'End While Loop', newline]);
             end
         end
         
@@ -810,17 +890,16 @@ classdef SAUCY < handle
             end
             
             n_clusters = S.n_clusters;
-            id_peaks_save = S.id_peaks_save';
-            IDX = S.IDX';
-            C = S.C;
+            id_peaks_save = S.spike_ids';
+            IDX = S.kMeans.idx';
+            C = S.kMeans.C;
             
             dat = S.data.amplifier_data_filt';
             Fs = S.Fs;
-            id_for_samp = S.id_for_samp;
             
             TH_original = S.TH_original;
             
-            SCORE = S.SCORE;
+            SCORE = S.PCA.score;
             spike_mat = S.spike_mat;
             invert_sign = S.inv_sign;
             nsamp_wave = S.nsamp_wave;
@@ -836,6 +915,10 @@ classdef SAUCY < handle
                 disp('Starting timer...');
             end
             
+            samp_dat = S.get_second_samp();
+            id_for_samp = samp_dat.ixs;
+            t_lims=id_for_samp([1 end])/Fs;
+            
             for x=1:n_clusters
                 id_tmp=find(IDX==x);
                 spike_ids_by_pca{x}=id_peaks_save(id_tmp);
@@ -843,14 +926,11 @@ classdef SAUCY < handle
                 all_mags{x}=dat(spike_ids_by_pca{x});
                 mean_peaks_later(x)=mean(dat(spike_ids_by_pca{x}));
                 
-                t_lims=id_for_samp([1 end])/Fs;
                 spike_ids_tmp=spike_times{x}(find(spike_times{x}>t_lims(1) & spike_times{x}<t_lims(2)));
                 plot(spike_ids_tmp-t_lims(1)+1/Fs,dat(round(spike_ids_tmp*Fs)),'o','color',col_vec(x),'markerfacecolor',col_vec(x));
-                
             end
             
             set(gca,'xlim',[0 length(id_for_samp)/Fs])
-
 
             if show_timing
                 disp(['Elapsed time plotting dots on example waveform= ' num2str(toc)]);
@@ -1309,12 +1389,6 @@ classdef SAUCY < handle
             disp([error_str '     '  num2str(TH_empirical) '    ' S.experiment_name])
             if show_timing,disp(['Elapsed time simulating distributions= ' num2str(toc)]);end
 
-
-
-
-
-
-
             subplot(2,10,19:20);
             cla;
             hold on;
@@ -1360,8 +1434,8 @@ classdef SAUCY < handle
         function do_saucy(S)
             % ----->> NEED TO SET UP DEFAULT ARGUMENTS FOR FUNCTIONS
             filter_data(S);
-            set_threshold(S);
-            set_spike_mat(S);
+            set_user_threshold(S);
+            do_clustering(S);
             optimize_clusters(S);
         end
     end
