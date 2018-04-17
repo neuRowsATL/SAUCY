@@ -73,7 +73,7 @@ classdef SAUCY < handle
         % ----- ----- ----- ----- -----
         % Get 1 second of sample data
         % Returns 1 second of sample data [t, wav]
-        function [t_dat wav_dat] = get_second_samp(S)
+        function [output] = get_second_samp(S)
             dat = S.data.amplifier_data_filt;
             Fs = S.Fs;
             
@@ -91,6 +91,10 @@ classdef SAUCY < handle
 
             t_dat = S.raw_data.t_amplifier(id_for_samp);
             wav_dat = S.data.amplifier_data_filt(id_for_samp);
+            
+            output.ts = t_dat;
+            output.wav = wav_dat;
+            output.ixs = id_for_samp;
         end
         
         % ----- ----- ----- ----- -----
@@ -103,6 +107,8 @@ classdef SAUCY < handle
         %       fname_intan
         function load_data(S, filename)
             if strfind(filename, '.rhd') > 0
+                %%%%% ADD CODE TO SAVE .mat FILE FOR QUICK ACCESS
+                
                 % Load data from .rhd file
                 [t_amplifier, t_board_adc, amplifier_data, board_adc_data, frequency_parameters] = ...
                    read_Intan_RHD2000_nongui_saucy(filename);
@@ -223,7 +229,10 @@ classdef SAUCY < handle
             end
             
             % Plot waveform sample for user selection of threshold
-            [ts wav_samp] = S.get_second_samp();
+            samp_dat = S.get_second_samp();
+            ts = samp_dat.ts;
+            wav_samp = samp_dat.wav;
+            
             figure();
             plot(ts, wav_samp, 'k');
             set(gca,'xlim',[min(ts) max(ts)]);
@@ -482,7 +491,8 @@ classdef SAUCY < handle
             % defaults, user will be able to adjust these below)
             nsamp_wave = S.nsamp_wave;
             vert_spike_lims=[0 0]; % use vertical limits to cut off mvmt artifact (default is not to use these)
-                    
+            id_peaks_save = [];        
+            
             while ~finished
                 if redo_peaks
                     % =====>> WHAT DOES THIS LINE DO?
@@ -498,7 +508,7 @@ classdef SAUCY < handle
                         % When re-called in batchmode, vert limits are as they
                         % appear on disply - i think the negative of how they are
                         % actually used with the inverted waveform
-                        disp('Hack to preserve sign of vert_spike_lims when running in batchmode')
+                        disp([newline, 'Hack to preserve sign of vert_spike_lims when running in batchmode', newline])
                         [spike_mat id_peaks_save] = S.set_spike_mat(S.alignment, spike_ids, vert_spike_lims);
                     end
                     
@@ -608,7 +618,11 @@ classdef SAUCY < handle
                     
                     clear spike_mat_tmp
                     
-                    % Make final plot showing waveforms and clusters
+                    % If vertical and horizontal limits are set, create
+                    % final plot to show waveforms.
+                    %
+                    % If both limits are not set, plot sample of waveforms
+                    % and prompt user to set vert/horiz limits.
                     % -----
                     if vert_spike_lims_approved & horiz_spike_lims_approved
                         close(gcf);
@@ -658,6 +672,7 @@ classdef SAUCY < handle
 
                         t_str{2}=['# waveforms - ' num2str(length(spike_mat)) ' only showing ' num2str(length(spike_mat_tmp{1})) ', chosen randomly'];
                     end
+                    
                     
                     xdat=[-nsamp_wave(1):nsamp_wave(2)]/(Fs./1000);% time in msec
                     
@@ -760,6 +775,7 @@ classdef SAUCY < handle
                         end
                         replot = true;
                         if redo_peaks
+                            disp([newline, 'redo peaks', newline]);
                             % The below is more efficient than re-generating spike_mat and
                             % id_peaks_save
                             %
@@ -769,6 +785,7 @@ classdef SAUCY < handle
                             clip_start=nsamp_wave_old(1)-nsamp_wave(1);
                             clip_end=nsamp_wave_old(2)-nsamp_wave(2);
                             [r_sp,c_sp]=size(spike_mat);
+                            
                             % clip out columns (time points) according to nsamp_wave
                             spike_mat_clipped=spike_mat(:,1+clip_start:c_sp-clip_end);
 
@@ -777,8 +794,10 @@ classdef SAUCY < handle
                             %                sum(potential_spike(1:nsamp_wave(1))*invert_sign<TH)
                             % in generate_spike_mat below
                             spike_mat_pre_peak=spike_mat_clipped(:,1:nsamp_wave(1));
+                            
                             % TH is positive, and so are peaks
                             spike_mat_pre_peak=spike_mat_pre_peak*invert_sign;
+                            
                             %            min(M,[],2) is min across rows matrix M
                             % id is rows of spike_mat_pre_peak that contain at least
                             % one value less than TH
@@ -796,6 +815,7 @@ classdef SAUCY < handle
                     
                     set(gca,'xlim',[min(xdat) max(xdat)]);
                 end
+                disp([newline, 'End While Loop', newline]);
             end
         end
         
@@ -847,17 +867,16 @@ classdef SAUCY < handle
             end
             
             n_clusters = S.n_clusters;
-            id_peaks_save = S.id_peaks_save';
-            IDX = S.IDX';
-            C = S.C;
+            id_peaks_save = S.spike_ids';
+            IDX = S.kMeans.idx';
+            C = S.kMeans.C;
             
             dat = S.data.amplifier_data_filt';
             Fs = S.Fs;
-            id_for_samp = S.id_for_samp;
             
             TH_original = S.TH_original;
             
-            SCORE = S.SCORE;
+            SCORE = S.PCA.score;
             spike_mat = S.spike_mat;
             invert_sign = S.inv_sign;
             nsamp_wave = S.nsamp_wave;
@@ -873,6 +892,10 @@ classdef SAUCY < handle
                 disp('Starting timer...');
             end
             
+            samp_dat = S.get_second_samp();
+            id_for_samp = samp_dat.ixs;
+            t_lims=id_for_samp([1 end])/Fs;
+            
             for x=1:n_clusters
                 id_tmp=find(IDX==x);
                 spike_ids_by_pca{x}=id_peaks_save(id_tmp);
@@ -880,14 +903,11 @@ classdef SAUCY < handle
                 all_mags{x}=dat(spike_ids_by_pca{x});
                 mean_peaks_later(x)=mean(dat(spike_ids_by_pca{x}));
                 
-                t_lims=id_for_samp([1 end])/Fs;
                 spike_ids_tmp=spike_times{x}(find(spike_times{x}>t_lims(1) & spike_times{x}<t_lims(2)));
                 plot(spike_ids_tmp-t_lims(1)+1/Fs,dat(round(spike_ids_tmp*Fs)),'o','color',col_vec(x),'markerfacecolor',col_vec(x));
-                
             end
             
             set(gca,'xlim',[0 length(id_for_samp)/Fs])
-
 
             if show_timing
                 disp(['Elapsed time plotting dots on example waveform= ' num2str(toc)]);
