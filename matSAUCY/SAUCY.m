@@ -1161,7 +1161,7 @@ classdef SAUCY < handle
                         TH_empirical=TH_empirical_by_type_1_error;disp('Using type 1 error criterion as threshold')
 
                           %  TH_empirical=-5000;disp('HACK SETTING TH_empirical to -5000')
-            end
+                    end
                 elseif threshold_strategy==2
                     n_in_spike_cluster=length(all_mags{end});% last entry is biggest spike
                     n_in_noise_cluster=length(all_noise_mags);
