@@ -627,7 +627,7 @@ classdef SAUCY < handle
                     if vert_spike_lims_approved & horiz_spike_lims_approved
                         close(gcf);
                         figure();
-                        %subplot(2,3,1);
+                        subplot(2,3,1);
                         
                         for z=1:n_clusters
                             id_tmp=find(IDX==z);
