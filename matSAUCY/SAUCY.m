@@ -8,12 +8,13 @@ classdef SAUCY < handle
         verbose = 0 % level of verbose output
         warning_str = [];
         
-        experiment_name = '' % base name of experiment
+        experiment_name = ''; % base name of experiment
         
-        data_path = '' % path to data files
-        fname_intan = '' % full file name of intan file
-        fname_cbin = '' % full file name of cbin file
-        fname_neuralnot = '' % full file name of neural_not file
+        data_path = ''; % path to data files
+        fname_mat = ''; % full file name of .mat file
+        fname_intan = ''; % full file name of .rhd (Intan) file
+        fname_cbin = ''; % full file name of .cbin file
+        fname_neuralnot = ''; % full file name of .neuralnot.mat file
         
         col_vec='rgbc';
         col_mat=[1 0 0;0 1 0;0 0 1;1 1 0];
@@ -21,29 +22,29 @@ classdef SAUCY < handle
         % chan          Channel number(s) for analysis
         %   as INT      Single channel will be used
         %   as TUPLE    Channel subtraction will be used [a b] = a - b
-        chan = []
+        chan = [];
         
-        n_clusters = 2 % number of clusters to detect
-        PCA = {}
-        kMeans = {}
+        n_clusters = 2; % number of clusters to detect
+        PCA = {};
+        kMeans = {};
         
         Fs % sampling rate of recording
         F_low % low cut off
         F_high % hi cut off
         filter_type % type of filter to apply
         
-        raw_data = {} % struct for raw data 
-        data = {} % struct for results
+        raw_data = {}; % struct for raw data 
+        data = {}; % struct for results
         
         alignment % how are spike times aligned? peak or threshold?
-        threshold = [] % Spike detection threshold
-        spike_ids = []
-        nsamp_wave = [30 90] % how many indices to include in spike_mat
+        threshold = []; % Spike detection threshold
+        spike_ids = [];
+        nsamp_wave = [30 90]; % how many indices to include in spike_mat
         
         % Bookkeeping variables
         TH_original % for plotting purposes only
-        inv_sign % indicates whether waveform is inverted
-        inv_waveform % indicates whether waveform has been inverted or not
+        inv_sign = 1; % indicates whether waveform is inverted
+        inv_waveform = 1; % indicates whether waveform has been inverted or not
         
         spike_mat % matrix of spike waveforms
     end
@@ -108,21 +109,31 @@ classdef SAUCY < handle
         function load_data(S, filename)
             if strfind(filename, '.rhd') > 0
                 %%%%% ADD CODE TO SAVE .mat FILE FOR QUICK ACCESS
+                basename = split(filename, '.');
+                S.fname_intan = filename;
+                S.fname_mat = strcat(basename{1}, '.mat');
+                
+                if ~exist(S.fname_mat, 'file')
+                    disp(['No .mat file found.', newline]);
+                    disp(['Converting .rhd file to .mat file', newline]);
+                    read_Intan_nongui(filename);
+                end
                 
                 % Load data from .rhd file
-                [t_amplifier, t_board_adc, amplifier_data, board_adc_data, frequency_parameters] = ...
-                   read_Intan_RHD2000_nongui_saucy(filename);
-                S.raw_data.t_amplifier = t_amplifier;
-                S.raw_data.t_board_adc = t_board_adc;
-                S.raw_data.amplifier_data = amplifier_data;
-                S.raw_data.board_adc_data = board_adc_data;
+%                 [t_amplifier, t_board_adc, amplifier_data, board_adc_data, frequency_parameters] = ...
+%                    read_Intan_RHD2000_nongui_saucy(filename);
+                disp(['Loading data...',newline]);
+                dat_tmp = load(S.fname_mat, 't_amplifier', 't_board_adc', 'amplifier_data', 'board_adc_data', 'frequency_parameters');
+                S.raw_data.t_amplifier = dat_tmp.t_amplifier;
+                S.raw_data.t_board_adc = dat_tmp.t_board_adc;
+                S.raw_data.amplifier_data = dat_tmp.amplifier_data;
+                S.raw_data.board_adc_data = dat_tmp.board_adc_data;
                 
                 % Set default data for analysis
                 S.data.amplifier_data_filt = S.raw_data.amplifier_data(S.chan,:);
                
-                S.Fs = frequency_parameters.amplifier_sample_rate;
+                S.Fs = dat_tmp.frequency_parameters.amplifier_sample_rate;
                
-                S.fname_intan = filename;
                
                 if S.verbose > 1
                     disp(['Successfully loaded Intan file: ', filename]);
@@ -191,12 +202,12 @@ classdef SAUCY < handle
         end
         
         % ----- ----- ----- ----- -----
-        % Set threshold for spike detection
+        % Set threshold for spike detection using SAUCY interface
         % Sets variables:  
         %       threshold, TH_original
         %       inv_sign
         %       inv_waveform
-        function set_threshold(S, data_source, std_th)
+        function set_user_threshold(S, data_source, std_th)
             % data_source       filt        Uses filtered data
             %                   raw         Uses raw data
             
@@ -336,9 +347,11 @@ classdef SAUCY < handle
         %       alignment
         function [spike_mat id_spikes] = set_spike_mat(S, alignment, spike_ids, vert_spike_lims)
             % Identify spike peaks (copied from neural_and_song.m)
-            % alignment             Specify how to align spikes
+            %   alignment           Specify how to align spikes
             %       peaks           Align spikes by peak
             %       threshold       Align spikes by threshold crossing
+            %   spike_ids           IDs of spikes
+            %   vert_spike_lims     Carried from original SAUCY
             
             % If no alignment mode is specified, ALIGN SPIKES TO PEAKS
             if nargin == 1
@@ -450,7 +463,7 @@ classdef SAUCY < handle
         
         % ===== ===== ===== ===== =====
         % Do clustering using kmeans
-        function do_clustering(S, n_clusters)
+        function do_clustering(S, n_clusters, spike_ids)
             %  Un-inverting waveform
             if S.inv_sign == -1
                 dat = -S.data.amplifier_data_filt;
@@ -461,9 +474,19 @@ classdef SAUCY < handle
             TH = S.threshold;
             Fs = S.Fs;
             invert_sign = S.inv_sign;
-            n_clusters = S.n_clusters;
-            spike_ids = S.spike_ids;
             
+            if nargin == 1
+                n_clusters = S.n_clusters;
+                spike_ids = S.spike_ids;
+            elseif nargin == 2
+                spike_ids = S.spike_ids;
+            elseif nargin == 3
+                disp(['Setting user-defined spike times',newline]);
+            else
+                error("Too many arguments in do_clustering()");
+            end
+                
+                
             % Extract spike waveforms and establish vertical and horizontal
             % limits
             % -----
@@ -1366,12 +1389,6 @@ classdef SAUCY < handle
             disp([error_str '     '  num2str(TH_empirical) '    ' S.experiment_name])
             if show_timing,disp(['Elapsed time simulating distributions= ' num2str(toc)]);end
 
-
-
-
-
-
-
             subplot(2,10,19:20);
             cla;
             hold on;
@@ -1417,7 +1434,7 @@ classdef SAUCY < handle
         function do_saucy(S)
             % ----->> NEED TO SET UP DEFAULT ARGUMENTS FOR FUNCTIONS
             filter_data(S);
-            set_threshold(S);
+            set_user_threshold(S);
             do_clustering(S);
             optimize_clusters(S);
         end
