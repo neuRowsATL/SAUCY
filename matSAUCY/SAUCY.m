@@ -1428,7 +1428,6 @@ classdef SAUCY < handle
                     text(xl(1)+.1*diff(xl),yl(2)-.075*(x)*diff(yl),['% ISIs <= 1 ms - ' num2str(tmp) '% from thresh'],'color',col_tmp(x-1))
                 end
             end
-
         end
         
         function do_saucy(S)
@@ -1442,3 +1441,56 @@ classdef SAUCY < handle
     
 end
 
+%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%% NEED TO REASSIGN OUTPUT DATA STRUCTURE OR WRITE FUNCTIONS THAT ALLOW
+%%%%% ACCESS TO THESE VARIABLES
+%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% clear spike_mat_tmp
+% Data.filename=RHD_name;
+% Data.n_units=n_clusters-1;  % number of non-noise waveforms
+% Data.vert_spike_lims=vert_spike_lims;
+% Data.nsamp_wave=nsamp_wave;
+% Data.run_bandpass=run_bandpass;
+% Data.bandpass_freqs=bandpass_freqs;
+% Data.TH=TH_set_by_user;
+% % for x=1:n_clusters-1
+% %     Data.spiketimes{x}=spike_ids_by_pca{x+1}/Fs;  % 2 is spike
+% % end
+% for x=1:n_clusters
+%     Data.spiketimes{x}=spike_ids_by_pca{x}/Fs;  % 2 is spike
+% end
+% Data.recommended_TH=TH_empirical;
+% Data.spiketimes_from_recommended_TH=spiketimes_from_recommended_TH;
+% waveform_temp=[];
+% for z=1:n_clusters
+%     id_tmp=find(IDX==z);
+%     spike_mat_tmp=spike_mat(id_tmp,:);
+%     Data.mean_waveform{z}=mean(spike_mat_tmp);
+%     Data.std_waveform{z}=std(spike_mat_tmp);
+%     waveform_temp=[waveform_temp; spike_mat_tmp];
+% end
+% Data.waveforms=waveform_temp;
+% %Data.components=component;
+% Data.components=SCORE;
+% Data.COEFF_matrix=COEFF;
+% Data.cov_matrices=cov_matrices;
+% Data.cov_centers=cov_centers;
+% Data.pct_error=pct_error;
+% Data.total_n_samples=length(dat);
+% if exist('warning_str')
+%     Data.warning_str=warning_str;
+% else
+%     Data.warning_str=[];
+% end
+% Data.Fs=Fs;
+% Data.inverted_waveform=inverted_waveform;
+% Data.pct_ISIs_leq_1ms=pct_Leq_1ms;
+% if batchmode_condition==0
+%     Data.LATENT = LATENT ;
+% end
+% if length(ch_num)==1
+%     eval(sprintf('save %s.neuralnot_CH%s.mat Data',RHD_name,num2str(ch_num)))
+% elseif length(ch_num)==2
+%     eval(sprintf('save %s.neuralnot_CH%s_minus_CH%s.mat Data',RHD_name,num2str(ch_num(1)),num2str(ch_num(2))))
+% end
