@@ -382,6 +382,7 @@ classdef SAUCY < handle
                     
             while ~finished
                 if redo_peaks
+                    % Ensure peaks are not too close to start/end of file
                     id_peaks = id_peaks(find(id_peaks>(nsamp_wave(1)+1)  & id_peaks<(length(dat)-nsamp_wave(2))));
                     
                     if show_timing
@@ -423,7 +424,7 @@ classdef SAUCY < handle
                     end
                     
                     % BC: 4/12/2018
-                    % Modified: UPDATED FUNCTION CALL
+                    % Modified: Deprecated function
                     % [COEFF, SCORE,LATENT] = princomp(spike_mat);
                     [COEFF, SCORE,LATENT] = pca(spike_mat);
                     S.SCORE = SCORE;
