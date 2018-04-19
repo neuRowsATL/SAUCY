@@ -14,7 +14,8 @@
 
 
 %%%%% Initiate SAUCY object for experiment: bl21lb21_171218
-mySaucy = SAUCY('bl21lb21_171218', 8);
+mySaucy = SAUCY('bl21lb21_171218');
+mySaucy.chan = 8;
 load_data(mySaucy, 'bl21lb21_171218_134533.rhd');
 filter_data(mySaucy);
 
@@ -26,6 +27,7 @@ filter_data(mySaucy);
 
 %%%%% Load spike times and then run SAUCY clustering
 load('bl21lb21_171218_CH8_spikes-th.mat');
+mySaucy.chan = 8;
 mySaucy.threshold = 80;
 do_clustering(mySaucy, 2, round(ts*30000));
 optimize_clusters(mySaucy);
