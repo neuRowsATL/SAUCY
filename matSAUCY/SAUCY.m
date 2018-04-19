@@ -55,20 +55,18 @@ classdef SAUCY < handle
         % Sets variables:
         %       experiment_name
         %       chan
-        function S = SAUCY(experiment_name, chan)
+        function S = SAUCY(experiment_name)
             S.experiment_name = experiment_name;
-            S.chan = chan;
             
             if S.verbose > 2
                 disp(['Initiated SAUCY for ', experiment_name]);
-                if length(chan) == 1
-                    disp(['Using unipolar channel: ', num2str(chan)]);
-                elseif length(chan) == 2
-                    disp(['Using subtracted channels: ', num2str(chan(1)), ' - ' num2str(chan(2))]);
-                else
-                    error('Invalid channel number or subtraction specification.');
-                end
             end
+        end
+        
+        % ----- ----- ----- ----- -----
+        % Set channel number or subtraction
+        function set_channel(S, chan)
+            S.chan = chan;
         end
         
         % ----- ----- ----- ----- -----
@@ -161,13 +159,15 @@ classdef SAUCY < handle
         %       F_low
         %       F_high
         %       filter_type
-        function filter_data(S, f_specs, filter_type)
+        %       chan
+        function filter_data(S, f_specs, filter_type, chan)
             if nargin == 1
                 disp('!! USING DEFAULT BANDPASS LIMITS [350 7000] !!');
                 disp('!! USING DEFAULT FILTER TYPE: hanningfir !!');
                 S.F_low = 350;
                 S.F_high = 7000;
                 S.filter_type = 'hanningfir';
+                S.chan = 0;
             elseif nargin == 2
                 if length(f_specs) == 2
                     S.F_low = f_specs(1);
@@ -175,12 +175,21 @@ classdef SAUCY < handle
                 end
                 disp('!! USING DEFAULT FILTER TYPE: hanningfir !!');
                 S.filter_type = 'hanningfir';
+                S.chan = 0;
             elseif nargin == 3
                 if length(f_specs) == 2
                     S.F_low = f_specs(1);
                     S.F_high = f_specs(2);
                 end
                 S.filter_type = filter_type;
+                S.chan = 0;
+            elseif nargin == 4
+                if length(f_specs) == 2
+                    S.F_low = f_specs(1);
+                    S.F_high = f_specs(2);
+                end
+                S.filter_type = filter_type;
+                S.chan = chan;
             else
                 error('Unable to figure out filter parameters.');    
             end
@@ -191,9 +200,20 @@ classdef SAUCY < handle
             disp(['Using filter type: ', S.filter_type]);
             
             if isfield(S.raw_data, 'amplifier_data')
-                S.data.amplifier_data_filt = ...
-                    bandpass_filtfilt(S.raw_data.amplifier_data(S.chan, :), ...
-                    S.Fs, S.F_low, S.F_high, S.filter_type);
+                if S.chan == 0
+                    data_tmp = zeros(size(S.raw_data.amplifier_data));
+                    parfor ix=1:size(S.raw_data.amplifier_data,1)
+                        disp(['Filtering Ch',num2str(ix,'%03.f'),'...']);
+                        data_tmp(ix,:) = ...
+                            bandpass_filtfilt(S.raw_data.amplifier_data(ix, :), ...
+                            S.Fs, S.F_low, S.F_high, S.filter_type);
+                    end
+                    S.data.amplifier_data_filt = data_tmp;
+                else
+                    S.data.amplifier_data_filt = ...
+                        bandpass_filtfilt(S.raw_data.amplifier_data(S.chan, :), ...
+                        S.Fs, S.F_low, S.F_high, S.filter_type);
+                end
             else
                 disp('ERROR: Check that data has been loaded into SAUCY.');
             end
