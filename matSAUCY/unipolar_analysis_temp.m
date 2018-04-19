@@ -11,8 +11,10 @@ function unipolar_analysis_temp(fname,display_filter,plotflag)
 if nargin==2
     plotflag=1;
 end
+
 n_chan=16;
 k=factor(n_chan);
+
 if length(k)==1
     r=k;
     c=1;

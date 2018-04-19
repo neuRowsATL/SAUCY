@@ -55,20 +55,18 @@ classdef SAUCY < handle
         % Sets variables:
         %       experiment_name
         %       chan
-        function S = SAUCY(experiment_name, chan)
+        function S = SAUCY(experiment_name)
             S.experiment_name = experiment_name;
-            S.chan = chan;
             
             if S.verbose > 2
                 disp(['Initiated SAUCY for ', experiment_name]);
-                if length(chan) == 1
-                    disp(['Using unipolar channel: ', num2str(chan)]);
-                elseif length(chan) == 2
-                    disp(['Using subtracted channels: ', num2str(chan(1)), ' - ' num2str(chan(2))]);
-                else
-                    error('Invalid channel number or subtraction specification.');
-                end
             end
+        end
+        
+        % ----- ----- ----- ----- -----
+        % Set channel number or subtraction
+        function set_channel(S, chan)
+            S.chan = chan;
         end
         
         % ----- ----- ----- ----- -----
@@ -161,13 +159,15 @@ classdef SAUCY < handle
         %       F_low
         %       F_high
         %       filter_type
-        function filter_data(S, f_specs, filter_type)
+        %       chan
+        function filter_data(S, f_specs, filter_type, chan)
             if nargin == 1
                 disp('!! USING DEFAULT BANDPASS LIMITS [350 7000] !!');
                 disp('!! USING DEFAULT FILTER TYPE: hanningfir !!');
                 S.F_low = 350;
                 S.F_high = 7000;
                 S.filter_type = 'hanningfir';
+                S.chan = 0;
             elseif nargin == 2
                 if length(f_specs) == 2
                     S.F_low = f_specs(1);
@@ -175,12 +175,21 @@ classdef SAUCY < handle
                 end
                 disp('!! USING DEFAULT FILTER TYPE: hanningfir !!');
                 S.filter_type = 'hanningfir';
+                S.chan = 0;
             elseif nargin == 3
                 if length(f_specs) == 2
                     S.F_low = f_specs(1);
                     S.F_high = f_specs(2);
                 end
                 S.filter_type = filter_type;
+                S.chan = 0;
+            elseif nargin == 4
+                if length(f_specs) == 2
+                    S.F_low = f_specs(1);
+                    S.F_high = f_specs(2);
+                end
+                S.filter_type = filter_type;
+                S.chan = chan;
             else
                 error('Unable to figure out filter parameters.');    
             end
@@ -191,9 +200,20 @@ classdef SAUCY < handle
             disp(['Using filter type: ', S.filter_type]);
             
             if isfield(S.raw_data, 'amplifier_data')
-                S.data.amplifier_data_filt = ...
-                    bandpass_filtfilt(S.raw_data.amplifier_data(S.chan, :), ...
-                    S.Fs, S.F_low, S.F_high, S.filter_type);
+                if S.chan == 0
+                    data_tmp = zeros(size(S.raw_data.amplifier_data));
+                    parfor ix=1:size(S.raw_data.amplifier_data,1)
+                        disp(['Filtering Ch',num2str(ix,'%03.f'),'...']);
+                        data_tmp(ix,:) = ...
+                            bandpass_filtfilt(S.raw_data.amplifier_data(ix, :), ...
+                            S.Fs, S.F_low, S.F_high, S.filter_type);
+                    end
+                    S.data.amplifier_data_filt = data_tmp;
+                else
+                    S.data.amplifier_data_filt = ...
+                        bandpass_filtfilt(S.raw_data.amplifier_data(S.chan, :), ...
+                        S.Fs, S.F_low, S.F_high, S.filter_type);
+                end
             else
                 disp('ERROR: Check that data has been loaded into SAUCY.');
             end
@@ -1161,7 +1181,7 @@ classdef SAUCY < handle
                         TH_empirical=TH_empirical_by_type_1_error;disp('Using type 1 error criterion as threshold')
 
                           %  TH_empirical=-5000;disp('HACK SETTING TH_empirical to -5000')
-            end
+                    end
                 elseif threshold_strategy==2
                     n_in_spike_cluster=length(all_mags{end});% last entry is biggest spike
                     n_in_noise_cluster=length(all_noise_mags);
@@ -1428,7 +1448,6 @@ classdef SAUCY < handle
                     text(xl(1)+.1*diff(xl),yl(2)-.075*(x)*diff(yl),['% ISIs <= 1 ms - ' num2str(tmp) '% from thresh'],'color',col_tmp(x-1))
                 end
             end
-
         end
         
         function do_saucy(S)
@@ -1442,3 +1461,56 @@ classdef SAUCY < handle
     
 end
 
+%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%% NEED TO REASSIGN OUTPUT DATA STRUCTURE OR WRITE FUNCTIONS THAT ALLOW
+%%%%% ACCESS TO THESE VARIABLES
+%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% clear spike_mat_tmp
+% Data.filename=RHD_name;
+% Data.n_units=n_clusters-1;  % number of non-noise waveforms
+% Data.vert_spike_lims=vert_spike_lims;
+% Data.nsamp_wave=nsamp_wave;
+% Data.run_bandpass=run_bandpass;
+% Data.bandpass_freqs=bandpass_freqs;
+% Data.TH=TH_set_by_user;
+% % for x=1:n_clusters-1
+% %     Data.spiketimes{x}=spike_ids_by_pca{x+1}/Fs;  % 2 is spike
+% % end
+% for x=1:n_clusters
+%     Data.spiketimes{x}=spike_ids_by_pca{x}/Fs;  % 2 is spike
+% end
+% Data.recommended_TH=TH_empirical;
+% Data.spiketimes_from_recommended_TH=spiketimes_from_recommended_TH;
+% waveform_temp=[];
+% for z=1:n_clusters
+%     id_tmp=find(IDX==z);
+%     spike_mat_tmp=spike_mat(id_tmp,:);
+%     Data.mean_waveform{z}=mean(spike_mat_tmp);
+%     Data.std_waveform{z}=std(spike_mat_tmp);
+%     waveform_temp=[waveform_temp; spike_mat_tmp];
+% end
+% Data.waveforms=waveform_temp;
+% %Data.components=component;
+% Data.components=SCORE;
+% Data.COEFF_matrix=COEFF;
+% Data.cov_matrices=cov_matrices;
+% Data.cov_centers=cov_centers;
+% Data.pct_error=pct_error;
+% Data.total_n_samples=length(dat);
+% if exist('warning_str')
+%     Data.warning_str=warning_str;
+% else
+%     Data.warning_str=[];
+% end
+% Data.Fs=Fs;
+% Data.inverted_waveform=inverted_waveform;
+% Data.pct_ISIs_leq_1ms=pct_Leq_1ms;
+% if batchmode_condition==0
+%     Data.LATENT = LATENT ;
+% end
+% if length(ch_num)==1
+%     eval(sprintf('save %s.neuralnot_CH%s.mat Data',RHD_name,num2str(ch_num)))
+% elseif length(ch_num)==2
+%     eval(sprintf('save %s.neuralnot_CH%s_minus_CH%s.mat Data',RHD_name,num2str(ch_num(1)),num2str(ch_num(2))))
+% end

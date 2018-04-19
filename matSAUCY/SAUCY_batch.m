@@ -1,4 +1,4 @@
-classdef meta_SAUCY < handle
+classdef SAUCY_batch < handle
     %meta_SAUCY Manages multiple SAUCY objects for analysis
     %   Large datasets can be managed across multiple data files using
     %   meta_SAUCY
