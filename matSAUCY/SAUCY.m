@@ -576,7 +576,7 @@ classdef SAUCY < handle
                     end
                     
                     % BC: 4/12/2018
-                    % Modified: UPDATED FUNCTION CALL
+                    % Modified: Deprecated function
                     % [COEFF, SCORE,LATENT] = princomp(spike_mat);
                     [COEFF, SCORE, LATENT] = pca(spike_mat);
                     S.PCA.coeff = COEFF;
